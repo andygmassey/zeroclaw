@@ -717,6 +717,8 @@ impl Channel for WhatsAppWebChannel {
                                             push_name: String::new(),
                                             phone_number: sender.clone(),
                                             is_group,
+                                            last_seen: None,
+                                            profile_photo_url: None,
                                         };
                                         let _ = store.upsert_contact(&contact);
                                     }
@@ -884,6 +886,8 @@ impl Channel for WhatsAppWebChannel {
                                         push_name: String::new(),
                                         phone_number: normalized.clone(),
                                         is_group,
+                                        last_seen: None,
+                                        profile_photo_url: None,
                                     };
                                     let _ = store.upsert_contact(&contact);
                                 }
@@ -931,6 +935,8 @@ impl Channel for WhatsAppWebChannel {
                                                     push_name: String::new(),
                                                     phone_number: chat_id.split_once('@').map(|(u, _): (&str, &str)| u.to_string()).unwrap_or_default(),
                                                     is_group,
+                                                    last_seen: None,
+                                                    profile_photo_url: None,
                                                 };
                                                 let _ = store.upsert_contact(&contact);
 

@@ -1,6 +1,37 @@
-//! Tool: whatsapp_get_contact
+//! Tool: `whatsapp_get_contact`.
 //!
-//! Gets contact details for a WhatsApp user by chat ID.
+//! Looks up a contact's stored profile info: display name, push name, phone
+//! number (as stored by the session), group flag, last-seen epoch (if the
+//! contact's privacy settings expose it), and profile photo URL (if any).
+//!
+//! # Privacy
+//!
+//! This tool only exposes data already persisted by the WhatsApp Web channel.
+//! It never makes a fresh server round trip, never decrypts anything not
+//! already decrypted by the session, and never returns data the linked
+//! WhatsApp Web session cannot already see.
+//!
+//! # Inputs
+//!
+//! - `chat_id` (string, required) – JID or a contact-name substring.
+//!
+//! # Output
+//!
+//! ```json
+//! {
+//!   "id": "1234567890@s.whatsapp.net",
+//!   "name": "Ada Lovelace",
+//!   "push_name": "Ada",
+//!   "phone_number": "+44 7000 000000",
+//!   "is_group": false,
+//!   "chat_type": "individual",
+//!   "last_seen": "2026-04-24T08:12:01+00:00",
+//!   "last_seen_unix": 1714032721,
+//!   "profile_photo_url": null
+//! }
+//! ```
+//!
+//! When a field is unknown the corresponding JSON key is `null`.
 
 use super::traits::{Tool, ToolResult};
 use crate::channels::whatsapp_message_store::WhatsAppMessageStore;
@@ -38,9 +69,11 @@ impl Tool for WhatsAppGetContactTool {
     }
 
     fn description(&self) -> &str {
-        "Get contact details for a WhatsApp user. \
-         Provide the chat_id from whatsapp_list_chats, or a contact name. \
-         Returns name, push name, phone number, and whether it's a group."
+        "Get stored profile info for a WhatsApp contact. \
+         Accepts a chat_id (JID) from whatsapp_list_chats, or a contact name \
+         (fuzzy-matched). Returns only fields the linked WhatsApp Web session \
+         already has – no fresh server calls, no data exposed beyond what \
+         WhatsApp itself exposes."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -49,7 +82,7 @@ impl Tool for WhatsAppGetContactTool {
             "properties": {
                 "chat_id": {
                     "type": "string",
-                    "description": "Chat ID or contact name to look up"
+                    "description": "Chat JID or a contact name substring to look up"
                 }
             },
             "required": ["chat_id"]
@@ -70,6 +103,7 @@ impl Tool for WhatsAppGetContactTool {
 
         #[cfg(not(feature = "whatsapp-web"))]
         {
+            let _ = args;
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -123,12 +157,19 @@ impl Tool for WhatsAppGetContactTool {
 
             match store.get_contact(&chat_id) {
                 Ok(Some(contact)) => {
+                    let last_seen_iso = contact.last_seen.and_then(|ts| {
+                        chrono::DateTime::from_timestamp(ts, 0).map(|dt| dt.to_rfc3339())
+                    });
                     let result = json!({
                         "id": contact.chat_id,
                         "name": contact.name,
                         "push_name": contact.push_name,
                         "phone_number": contact.phone_number,
                         "is_group": contact.is_group,
+                        "chat_type": if contact.is_group { "group" } else { "individual" },
+                        "last_seen": last_seen_iso,
+                        "last_seen_unix": contact.last_seen,
+                        "profile_photo_url": contact.profile_photo_url,
                     });
 
                     Ok(ToolResult {
@@ -169,5 +210,57 @@ mod tests {
         let schema = tool.parameters_schema();
         let required = schema["required"].as_array().unwrap();
         assert!(required.iter().any(|v| v == "chat_id"));
+    }
+
+    #[cfg(feature = "whatsapp-web")]
+    #[tokio::test]
+    async fn execute_returns_full_contact_record() {
+        use crate::channels::whatsapp_message_store::{StoredContact, WhatsAppMessageStore};
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let jid = "1234567890@s.whatsapp.net";
+        {
+            let store =
+                WhatsAppMessageStore::new(&tmp.path().join("whatsapp-messages.db")).unwrap();
+            store
+                .upsert_contact(&StoredContact {
+                    chat_id: jid.into(),
+                    name: "Ada Lovelace".into(),
+                    push_name: "Ada".into(),
+                    // Synthetic UK test number per CM047 brief.
+                    phone_number: "+44 7000 000000".into(),
+                    is_group: false,
+                    last_seen: Some(1_714_032_721),
+                    profile_photo_url: None,
+                })
+                .unwrap();
+        }
+
+        let tool =
+            WhatsAppGetContactTool::new(Arc::new(SecurityPolicy::default()), tmp.path());
+        let result = tool.execute(json!({ "chat_id": jid })).await.unwrap();
+        assert!(result.success, "{:?}", result.error);
+
+        let parsed: serde_json::Value = serde_json::from_str(&result.output).unwrap();
+        assert_eq!(parsed["id"], jid);
+        assert_eq!(parsed["name"], "Ada Lovelace");
+        assert_eq!(parsed["chat_type"], "individual");
+        assert_eq!(parsed["last_seen_unix"], 1_714_032_721_i64);
+        assert!(parsed["last_seen"].is_string());
+        assert!(parsed["profile_photo_url"].is_null());
+    }
+
+    #[cfg(feature = "whatsapp-web")]
+    #[tokio::test]
+    async fn execute_reports_missing_contact_clearly() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let tool =
+            WhatsAppGetContactTool::new(Arc::new(SecurityPolicy::default()), tmp.path());
+        let result = tool
+            .execute(json!({ "chat_id": "1234567890@s.whatsapp.net" }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("No contact details stored"));
     }
 }
