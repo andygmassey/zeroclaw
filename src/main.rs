@@ -239,6 +239,21 @@ enum Commands {
         tui: bool,
     },
 
+    /// Reconfigure an existing installation (channels, etc.)
+    #[command(long_about = "\
+Reconfigure an existing ZeroClaw installation without touching providers or memory.
+
+Subcommands let you repair individual sections of config.toml interactively. \
+This is the command installers and first-run flows should invoke to add or \
+replace a channel post-install.
+
+Examples:
+  zeroclaw setup channels --interactive     # re-run the channels wizard")]
+    Setup {
+        #[command(subcommand)]
+        setup_command: SetupCommands,
+    },
+
     /// Start the AI agent loop
     #[command(long_about = "\
 Start the AI agent loop.
@@ -660,6 +675,16 @@ Examples:
 
 /// Stub enum that mirrors the old `props` subcommands so clap can still parse
 /// `zeroclaw props <anything>` and print a deprecation message.
+#[derive(Subcommand, Debug)]
+enum SetupCommands {
+    /// Reconfigure channels (re-run the channels wizard)
+    Channels {
+        /// Run the interactive channels wizard. Currently the only mode.
+        #[arg(long, default_value_t = true)]
+        interactive: bool,
+    },
+}
+
 #[derive(Subcommand, Debug)]
 enum DeprecatedPropsCommands {
     #[command(external_subcommand)]
@@ -1124,6 +1149,22 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // `setup` subcommands reconfigure parts of an existing install without
+    // requiring a full `Config::load_or_init` pass first (the repair wizard
+    // loads/saves config itself).
+    #[cfg(feature = "agent-runtime")]
+    if let Commands::Setup { setup_command } = &cli.command {
+        match setup_command {
+            SetupCommands::Channels { interactive: _ } => {
+                // --interactive is the current default and only mode; the flag is
+                // reserved for future non-interactive variants.
+                let wizard_callbacks = build_wizard_callbacks();
+                Box::pin(onboard::run_channels_repair_wizard(wizard_callbacks)).await?;
+                return Ok(());
+            }
+        }
+    }
+
     // All other commands need config loaded first
     let mut config = Box::pin(Config::load_or_init()).await?;
     config.apply_env_overrides();
@@ -1216,7 +1257,9 @@ async fn main() -> Result<()> {
 
     #[cfg(feature = "agent-runtime")]
     match cli.command {
-        Commands::Onboard { .. } | Commands::Completions { .. } => unreachable!(),
+        Commands::Onboard { .. } | Commands::Setup { .. } | Commands::Completions { .. } => {
+            unreachable!()
+        }
 
         Commands::Agent {
             message,

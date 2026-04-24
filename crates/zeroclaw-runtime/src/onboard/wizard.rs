@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
 use zeroclaw_config::schema::{
-    AutonomyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config, DiscordConfig,
-    HeartbeatConfig, IMessageConfig, LarkConfig, MatrixConfig, MemoryConfig, ObservabilityConfig,
-    RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig, TelegramConfig, WebhookConfig,
+    AutonomyConfig, BlueskyConfig, BrowserConfig, ChannelsConfig, ComposioConfig, Config,
+    DiscordConfig, HeartbeatConfig, IMessageConfig, LarkConfig, MatrixConfig, MattermostConfig,
+    MemoryConfig, ObservabilityConfig, RuntimeConfig, SecretsConfig, SlackConfig, StorageConfig,
+    TelegramConfig, WebhookConfig,
 };
 use zeroclaw_config::schema::{
     DingTalkConfig, IrcConfig, LarkReceiveMode, LinqConfig, NextcloudTalkConfig, QQConfig,
@@ -3670,6 +3671,8 @@ enum ChannelMenuChoice {
     Telegram,
     Discord,
     Slack,
+    Mattermost,
+    Bluesky,
     IMessage,
     Matrix,
     Signal,
@@ -3691,6 +3694,8 @@ const CHANNEL_MENU_CHOICES: &[ChannelMenuChoice] = &[
     ChannelMenuChoice::Telegram,
     ChannelMenuChoice::Discord,
     ChannelMenuChoice::Slack,
+    ChannelMenuChoice::Mattermost,
+    ChannelMenuChoice::Bluesky,
     ChannelMenuChoice::IMessage,
     ChannelMenuChoice::Matrix,
     ChannelMenuChoice::Signal,
@@ -3750,6 +3755,22 @@ fn setup_channels(
                         "✅ connected"
                     } else {
                         "— connect your bot"
+                    }
+                ),
+                ChannelMenuChoice::Mattermost => format!(
+                    "Mattermost {}",
+                    if config.mattermost.is_some() {
+                        "✅ connected"
+                    } else {
+                        "— connect your bot"
+                    }
+                ),
+                ChannelMenuChoice::Bluesky => format!(
+                    "Bluesky    {}",
+                    if config.bluesky.is_some() {
+                        "✅ connected"
+                    } else {
+                        "— AT Protocol"
                     }
                 ),
                 ChannelMenuChoice::IMessage => format!(
@@ -4322,6 +4343,263 @@ fn setup_channels(
                         .map(|s| s.draft_update_interval_ms)
                         .unwrap_or(1200),
                     cancel_reaction: existing_sl.and_then(|s| s.cancel_reaction.clone()),
+                });
+            }
+            ChannelMenuChoice::Mattermost => {
+                // ── Mattermost ──
+                println!();
+                println!(
+                    "  {} {}",
+                    style("Mattermost Setup").white().bold(),
+                    style("– talk to ZeroClaw from Mattermost").dim()
+                );
+                print_bullet("1. In your Mattermost team, open Integrations -> Bot Accounts");
+                print_bullet("2. Create a new bot account and copy its access token");
+                print_bullet("3. Paste the server URL and token below");
+                println!();
+
+                let url: String = Input::new()
+                    .with_prompt("  Mattermost server URL (e.g. https://mm.example.com)")
+                    .interact_text()?;
+                let url = url.trim().trim_end_matches('/').to_string();
+
+                if url.is_empty() {
+                    println!("  {} Skipped", style("→").dim());
+                    continue;
+                }
+
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    println!(
+                        "  {} URL must start with http:// or https://",
+                        style("❌").red().bold()
+                    );
+                    continue;
+                }
+
+                let token: String = Input::new()
+                    .with_prompt("  Bot access token")
+                    .interact_text()?;
+                let token = token.trim().to_string();
+
+                if token.is_empty() {
+                    println!("  {} Skipped", style("→").dim());
+                    continue;
+                }
+
+                // Test connection (run entirely in separate thread – Response must be used/dropped there)
+                print!("  {} Testing connection... ", style("⏳").dim());
+                let url_clone = url.clone();
+                let token_clone = token.clone();
+                let thread_result = std::thread::spawn(move || {
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(Duration::from_secs(8))
+                        .connect_timeout(Duration::from_secs(4))
+                        .build()
+                        .map_err(|err| format!("failed to build HTTP client: {err}"))?;
+                    let endpoint = format!("{url_clone}/api/v4/users/me");
+                    let response = client
+                        .get(&endpoint)
+                        .bearer_auth(&token_clone)
+                        .send()
+                        .map_err(|err| format!("request error: {err}"))?;
+                    let status = response.status();
+                    let payload: Value = response.json().unwrap_or_default();
+                    if status.is_success() {
+                        let username = payload
+                            .get("username")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown")
+                            .to_string();
+                        Ok::<String, String>(username)
+                    } else {
+                        let detail = payload
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown error");
+                        Err(format!("auth rejected ({status}): {detail}"))
+                    }
+                })
+                .join();
+
+                match thread_result {
+                    Ok(Ok(username)) => {
+                        println!(
+                            "\r  {} Connected as @{username}        ",
+                            style("✅").green().bold()
+                        );
+                    }
+                    Ok(Err(reason)) => {
+                        println!(
+                            "\r  {} Connection failed – check your URL and token",
+                            style("❌").red().bold()
+                        );
+                        println!("    {}", style(reason).dim());
+                        continue;
+                    }
+                    Err(_) => {
+                        println!(
+                            "\r  {} Connection failed – check your URL and token",
+                            style("❌").red().bold()
+                        );
+                        continue;
+                    }
+                }
+
+                let channel: String = Input::new()
+                    .with_prompt("  Default channel ID (optional, Enter to skip)")
+                    .allow_empty(true)
+                    .interact_text()?;
+                let channel = channel.trim().to_string();
+
+                print_bullet("Allowlist your own Mattermost user ID first (recommended).");
+                print_bullet(
+                    "Find it via Profile -> Account Settings -> Security -> View user ID, or with `mmctl user search`.",
+                );
+                print_bullet("Use '*' only for temporary open testing.");
+
+                let allowed_users_str: String = Input::new()
+                    .with_prompt(
+                        "  Allowed Mattermost user IDs (comma-separated, '*' for all)",
+                    )
+                    .allow_empty(true)
+                    .interact_text()?;
+
+                let allowed_users: Vec<String> = if allowed_users_str.trim() == "*" {
+                    vec!["*".into()]
+                } else {
+                    allowed_users_str
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                };
+
+                if allowed_users.is_empty() {
+                    println!(
+                        "  {} No users allowlisted – Mattermost inbound messages will be denied until you add IDs or '*'.",
+                        style("⚠").yellow().bold()
+                    );
+                }
+
+                config.mattermost = Some(MattermostConfig {
+                    enabled: true,
+                    url,
+                    bot_token: token,
+                    channel_id: if channel.is_empty() {
+                        None
+                    } else {
+                        Some(channel)
+                    },
+                    allowed_users,
+                    thread_replies: Some(true),
+                    mention_only: Some(false),
+                    interrupt_on_new_message: false,
+                    proxy_url: None,
+                });
+            }
+            ChannelMenuChoice::Bluesky => {
+                // ── Bluesky ──
+                println!();
+                println!(
+                    "  {} {}",
+                    style("Bluesky Setup").white().bold(),
+                    style("– talk to ZeroClaw from Bluesky (AT Protocol)").dim()
+                );
+                print_bullet(
+                    "1. In Bluesky, open Settings -> Privacy and security -> App passwords",
+                );
+                print_bullet("2. Create a new app password (do NOT use your main password)");
+                print_bullet("3. Enter your handle and the generated app password below");
+                println!();
+
+                let handle: String = Input::new()
+                    .with_prompt("  Bluesky handle (e.g. mybot.bsky.social)")
+                    .interact_text()?;
+                let handle = handle.trim().trim_start_matches('@').to_string();
+
+                if handle.is_empty() {
+                    println!("  {} Skipped", style("→").dim());
+                    continue;
+                }
+
+                let app_password: String = Input::new()
+                    .with_prompt("  App password")
+                    .interact_text()?;
+                let app_password = app_password.trim().to_string();
+
+                if app_password.is_empty() {
+                    println!("  {} Skipped", style("→").dim());
+                    continue;
+                }
+
+                // Test connection: createSession with handle + app password.
+                print!("  {} Testing connection... ", style("⏳").dim());
+                let handle_clone = handle.clone();
+                let password_clone = app_password.clone();
+                let thread_result = std::thread::spawn(move || {
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(Duration::from_secs(8))
+                        .connect_timeout(Duration::from_secs(4))
+                        .build()
+                        .map_err(|err| format!("failed to build HTTP client: {err}"))?;
+                    let body = serde_json::json!({
+                        "identifier": handle_clone,
+                        "password": password_clone,
+                    });
+                    let response = client
+                        .post("https://bsky.social/xrpc/com.atproto.server.createSession")
+                        .json(&body)
+                        .send()
+                        .map_err(|err| format!("request error: {err}"))?;
+                    let status = response.status();
+                    let payload: Value = response.json().unwrap_or_default();
+                    if status.is_success() {
+                        let did = payload
+                            .get("did")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown")
+                            .to_string();
+                        Ok::<String, String>(did)
+                    } else {
+                        let detail = payload
+                            .get("message")
+                            .or_else(|| payload.get("error"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown error");
+                        Err(format!("auth rejected ({status}): {detail}"))
+                    }
+                })
+                .join();
+
+                match thread_result {
+                    Ok(Ok(did)) => {
+                        println!(
+                            "\r  {} Connected – DID: {}        ",
+                            style("✅").green().bold(),
+                            style(did).cyan()
+                        );
+                    }
+                    Ok(Err(reason)) => {
+                        println!(
+                            "\r  {} Connection failed – check your handle and app password",
+                            style("❌").red().bold()
+                        );
+                        println!("    {}", style(reason).dim());
+                        continue;
+                    }
+                    Err(_) => {
+                        println!(
+                            "\r  {} Connection failed – check your handle and app password",
+                            style("❌").red().bold()
+                        );
+                        continue;
+                    }
+                }
+
+                config.bluesky = Some(BlueskyConfig {
+                    enabled: true,
+                    handle,
+                    app_password,
                 });
             }
             ChannelMenuChoice::IMessage => {
@@ -8316,6 +8594,12 @@ mod tests {
         assert!(channel_menu_choices().contains(&ChannelMenuChoice::NextcloudTalk));
         assert!(channel_menu_choices().contains(&ChannelMenuChoice::Lark));
         assert!(channel_menu_choices().contains(&ChannelMenuChoice::Feishu));
+    }
+
+    #[test]
+    fn channel_menu_choices_include_bluesky_and_mattermost() {
+        assert!(channel_menu_choices().contains(&ChannelMenuChoice::Bluesky));
+        assert!(channel_menu_choices().contains(&ChannelMenuChoice::Mattermost));
     }
 
     #[test]
