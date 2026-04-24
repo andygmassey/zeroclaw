@@ -93,6 +93,12 @@ pub mod web_fetch;
 mod web_search_provider_routing;
 pub mod web_search_tool;
 pub mod workspace_tool;
+#[cfg(feature = "whatsapp-web")]
+pub mod whatsapp_list_chats;
+#[cfg(feature = "whatsapp-web")]
+pub mod whatsapp_read_history;
+#[cfg(feature = "whatsapp-web")]
+pub mod whatsapp_get_contact;
 
 pub use backup_tool::BackupTool;
 pub use browser::{BrowserTool, ComputerUseConfig};
@@ -173,6 +179,12 @@ pub use weather_tool::WeatherTool;
 pub use web_fetch::WebFetchTool;
 pub use web_search_tool::WebSearchTool;
 pub use workspace_tool::WorkspaceTool;
+#[cfg(feature = "whatsapp-web")]
+pub use whatsapp_list_chats::WhatsAppListChatsTool;
+#[cfg(feature = "whatsapp-web")]
+pub use whatsapp_read_history::WhatsAppReadHistoryTool;
+#[cfg(feature = "whatsapp-web")]
+pub use whatsapp_get_contact::WhatsAppGetContactTool;
 
 use crate::config::{Config, DelegateAgentConfig};
 use crate::memory::Memory;
@@ -403,6 +415,27 @@ pub fn all_tools_with_runtime(
                 tracing::warn!("discord_search: failed to open discord.db: {e}");
             }
         }
+    }
+
+    // Register WhatsApp mining tools when whatsapp-web feature is enabled
+    #[cfg(feature = "whatsapp-web")]
+    {
+        let zeroclaw_dir = root_config
+            .config_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        tool_arcs.push(Arc::new(WhatsAppListChatsTool::new(
+            security.clone(),
+            zeroclaw_dir,
+        )));
+        tool_arcs.push(Arc::new(WhatsAppReadHistoryTool::new(
+            security.clone(),
+            zeroclaw_dir,
+        )));
+        tool_arcs.push(Arc::new(WhatsAppGetContactTool::new(
+            security.clone(),
+            zeroclaw_dir,
+        )));
     }
 
     if matches!(

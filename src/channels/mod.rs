@@ -57,6 +57,8 @@ pub mod whatsapp;
 #[cfg(feature = "whatsapp-web")]
 pub mod whatsapp_storage;
 #[cfg(feature = "whatsapp-web")]
+pub mod whatsapp_message_store;
+#[cfg(feature = "whatsapp-web")]
 pub mod whatsapp_web;
 
 pub use bluesky::BlueskyChannel;

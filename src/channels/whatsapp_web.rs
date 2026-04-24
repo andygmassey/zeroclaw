@@ -589,6 +589,7 @@ impl Channel for WhatsAppWebChannel {
         use wa_rs::store::{Device, DeviceStore};
         use wa_rs_binary::jid::JidExt as _;
         use wa_rs_core::proto_helpers::MessageExt;
+        use super::whatsapp_message_store::{WhatsAppMessageStore, StoredMessage, StoredContact};
         use wa_rs_core::types::events::Event;
         use wa_rs_tokio_transport::TokioWebSocketTransportFactory;
         use wa_rs_ureq_http::UreqHttpClient;
@@ -650,6 +651,22 @@ impl Channel for WhatsAppWebChannel {
             let wa_group_policy = self.group_policy.clone();
             let wa_self_chat_mode = self.self_chat_mode;
 
+            // Message store for WhatsApp mining tools
+            let msg_store = {
+                let store_path = shellexpand::tilde("~/.zeroclaw/whatsapp-messages.db").to_string();
+                match WhatsAppMessageStore::new(std::path::Path::new(&store_path)) {
+                    Ok(s) => {
+                        tracing::info!("WhatsApp Web: message store opened at {store_path}");
+                        Some(Arc::new(s))
+                    }
+                    Err(e) => {
+                        tracing::warn!("WhatsApp Web: failed to open message store: {e}");
+                        None
+                    }
+                }
+            };
+            let msg_store_clone = msg_store.clone();
+
             let mut builder = Bot::builder()
                 .with_backend(backend)
                 .with_transport_factory(transport_factory)
@@ -665,6 +682,7 @@ impl Channel for WhatsAppWebChannel {
                     let wa_mode = wa_mode.clone();
                     let wa_dm_policy = wa_dm_policy.clone();
                     let wa_group_policy = wa_group_policy.clone();
+                    let msg_store_inner = msg_store_clone.clone();
                     async move {
                         match event {
                             Event::Message(msg, info) => {
@@ -672,6 +690,37 @@ impl Channel for WhatsAppWebChannel {
                                 let sender_alt = info.source.sender_alt.clone();
                                 let sender = sender_jid.user().to_string();
                                 let chat = info.source.chat.to_string();
+
+                                // Early persistence: store ALL messages for mining
+                                // regardless of allowed_numbers or policy filters.
+                                if let Some(ref store) = msg_store_inner {
+                                    use wa_rs_core::proto_helpers::MessageExt;
+                                    let early_body = msg.text_content().unwrap_or("").to_string();
+                                    if !early_body.is_empty() {
+                                        let is_group = chat.contains("@g.us");
+                                        let stored = StoredMessage {
+                                            id: uuid::Uuid::new_v4().to_string(),
+                                            chat_id: chat.clone(),
+                                            chat_name: chat.split_once('@').map(|(u, _): (&str, &str)| u.to_string()).unwrap_or_else(|| chat.clone()),
+                                            sender_name: sender.clone(),
+                                            from_me: false,
+                                            body: early_body,
+                                            timestamp: chrono::Utc::now().timestamp(),
+                                            has_media: msg.audio_message.is_some(),
+                                            msg_type: "text".to_string(),
+                                        };
+                                        let _ = store.upsert_message(&stored);
+                                        // Upsert contact
+                                        let contact = StoredContact {
+                                            chat_id: chat.clone(),
+                                            name: sender.clone(),
+                                            push_name: String::new(),
+                                            phone_number: sender.clone(),
+                                            is_group,
+                                        };
+                                        let _ = store.upsert_contact(&contact);
+                                    }
+                                }
 
                                 let mapped_phone = if sender_jid.is_lid() {
                                     client.get_phone_number_from_lid(&sender_jid.user).await
@@ -811,6 +860,34 @@ impl Channel for WhatsAppWebChannel {
                                     return;
                                 }
 
+                                // Persist message for mining tools
+                                if let Some(ref store) = msg_store_inner {
+                                    let is_group = chat.contains("@g.us");
+                                    let stored = StoredMessage {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        chat_id: chat.clone(),
+                                        chat_name: chat.split_once('@').map(|(u, _): (&str, &str)| u.to_string()).unwrap_or_else(|| chat.clone()),
+                                        sender_name: normalized.clone(),
+                                        from_me: false,
+                                        body: content.clone(),
+                                        timestamp: chrono::Utc::now().timestamp(),
+                                        has_media: msg.audio_message.is_some(),
+                                        msg_type: "text".to_string(),
+                                    };
+                                    if let Err(e) = store.upsert_message(&stored) {
+                                        tracing::debug!("WhatsApp msg store write failed: {e}");
+                                    }
+                                    // Also upsert contact info
+                                    let contact = StoredContact {
+                                        chat_id: chat.clone(),
+                                        name: normalized.clone(),
+                                        push_name: String::new(),
+                                        phone_number: normalized.clone(),
+                                        is_group,
+                                    };
+                                    let _ = store.upsert_contact(&contact);
+                                }
+
                                 if let Err(e) = tx_inner
                                     .send(ChannelMessage {
                                         id: uuid::Uuid::new_v4().to_string(),
@@ -831,6 +908,78 @@ impl Channel for WhatsAppWebChannel {
                             Event::Connected(_) => {
                                 tracing::info!("WhatsApp Web connected successfully");
                                 WhatsAppWebChannel::reset_retry(&retry_count);
+                            }
+                            Event::HistorySync(history) => {
+                                // Process history sync — WhatsApp sends up to 30 days
+                                // of message history on reconnect. Persist each
+                                // conversation's messages to the mining store.
+                                if let Some(ref store) = msg_store_inner {
+                                                                                                            match serde_json::to_vec(&history) {
+                                        Ok(_) => {},
+                                        Err(_) => {
+                                            // HistorySync is already decoded; extract conversations directly
+                                            let mut count = 0usize;
+                                            for conv in history.conversations.iter() {
+                                                let chat_id = conv.id.clone();
+                                                let chat_name = conv.name.clone().unwrap_or_else(|| chat_id.clone());
+                                                let is_group = chat_id.contains("@g.us");
+
+                                                // Upsert contact for this conversation
+                                                let contact = StoredContact {
+                                                    chat_id: chat_id.clone(),
+                                                    name: chat_name.clone(),
+                                                    push_name: String::new(),
+                                                    phone_number: chat_id.split_once('@').map(|(u, _): (&str, &str)| u.to_string()).unwrap_or_default(),
+                                                    is_group,
+                                                };
+                                                let _ = store.upsert_contact(&contact);
+
+                                                // Process messages in this conversation
+                                                for hist_msg in conv.messages.iter() {
+                                                    if let Some(ref wm) = hist_msg.message {
+                                                        if let Some(ref msg_inner) = wm.message {
+                                                            let body = msg_inner.conversation.clone()
+                                                                .or_else(|| msg_inner.extended_text_message.as_ref().and_then(|e| e.text.clone()))
+                                                                .unwrap_or_default();
+                                                            if body.is_empty() { continue; }
+
+                                                            let sender = wm.key.participant.clone()
+                                                                .or_else(|| wm.key.remote_jid.clone())
+                                                                .unwrap_or_default();
+                                                            let from_me = wm.key.from_me.unwrap_or(false);
+                                                            let ts = wm.message_timestamp
+                                                                .map(|t| t as i64)
+                                                                .unwrap_or(0);
+                                                            let msg_id = wm.key.id.clone()
+                                                                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+                                                            let stored = StoredMessage {
+                                                                id: msg_id,
+                                                                chat_id: chat_id.clone(),
+                                                                chat_name: chat_name.clone(),
+                                                                sender_name: sender,
+                                                                from_me,
+                                                                body,
+                                                                timestamp: ts,
+                                                                has_media: false,
+                                                                msg_type: "text".to_string(),
+                                                            };
+                                                            if store.upsert_message(&stored).is_ok() {
+                                                                count += 1;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            tracing::info!(
+                                                "WhatsApp history sync: persisted {count} messages from {} conversations",
+                                                history.conversations.len()
+                                            );
+                                        }
+                                    };
+                                } else {
+                                    tracing::debug!("WhatsApp history sync received but no message store available");
+                                }
                             }
                             Event::LoggedOut(_) => {
                                 session_revoked.store(true, std::sync::atomic::Ordering::Relaxed);
