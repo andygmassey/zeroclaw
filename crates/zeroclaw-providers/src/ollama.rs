@@ -821,13 +821,17 @@ impl Provider for OllamaProvider {
     }
 
     fn supports_native_tools(&self) -> bool {
-        // Default to prompt-guided tool calling (XML instructions in system prompt)
-        // because many Ollama-served models do not support Ollama's native
-        // /api/chat tool-calling parameter. Models that lack support silently
-        // ignore the tools array and emit tool-call JSON as plain text, which the
-        // agent loop cannot parse without the XML protocol instructions.
-        // See: https://github.com/zeroclaw-labs/zeroclaw/issues/3999
-        false
+        // Opt-in via OLLAMA_NATIVE_TOOLS=true (case-insensitive: 1/true/yes/on).
+        // Default false for backwards compatibility - many Ollama-served models do
+        // not support Ollama's native /api/chat tool-calling parameter and silently
+        // ignore the tools array. Operators who know their chosen model supports
+        // native tools (e.g. qwen3.5:9b, llama3.3, mistral) can flip the env var
+        // to bypass the prompt-guided XML fallback. See upstream PR #5523 (closed)
+        // and issue #3999 for context. Ostler maintains this as a private patch on
+        // the marvin user fork pending a different upstream solution.
+        std::env::var("OLLAMA_NATIVE_TOOLS")
+            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false)
     }
 
     async fn chat(

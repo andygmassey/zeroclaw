@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use directories::UserDirs;
 use rusqlite::{Connection, OpenFlags};
+use tokio::fs;
 use tokio::sync::mpsc;
 use zeroclaw_api::channel::{Channel, ChannelMessage, SendMessage};
 
@@ -306,6 +307,13 @@ end tell"#
                     tracing::warn!("iMessage poll error: {e}");
                 }
             }
+
+            // Also drain the assistant-bridge inbox.jsonl. Messages routed
+            // to a separate Apple ID on the assistant macOS user are buffered
+            // there by /Users/Shared/imessage-bridge/bridge.py.
+            if let Err(e) = self.poll_bridge_inbox(&tx).await {
+                tracing::warn!("iMessage bridge inbox poll error: {e}");
+            }
         }
     }
 
@@ -319,6 +327,90 @@ end tell"#
             .unwrap_or_default();
 
         db_path.exists()
+    }
+}
+
+impl IMessageChannel {
+    /// Path to the assistant-user iMessage bridge buffer.
+    /// bridge.py (run as the assistant macOS user) polls that user chat.db
+    /// every few seconds and appends new inbound messages here as JSON-lines.
+    /// We drain + truncate atomically per poll cycle.
+    const BRIDGE_INBOX_PATH: &'static str = "/Users/Shared/imessage-bridge/inbox.jsonl";
+
+    async fn poll_bridge_inbox(
+        &self,
+        tx: &mpsc::Sender<ChannelMessage>,
+    ) -> anyhow::Result<()> {
+        let path = std::path::Path::new(Self::BRIDGE_INBOX_PATH);
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let content = fs::read_to_string(path).await?;
+        if content.trim().is_empty() {
+            return Ok(());
+        }
+
+        let mut sent_any = false;
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let entry: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!("bridge inbox: invalid JSON line skipped: {e}");
+                    continue;
+                }
+            };
+
+            let rowid = entry.get("rowid").and_then(|v| v.as_i64()).unwrap_or(0);
+            let sender = entry.get("sender").and_then(|v| v.as_str()).unwrap_or("");
+            let text = entry.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let timestamp = entry.get("timestamp").and_then(|v| v.as_u64()).unwrap_or_else(
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs()
+                },
+            );
+
+            if sender.is_empty() || text.trim().is_empty() {
+                continue;
+            }
+
+            if !self.is_contact_allowed(sender) {
+                tracing::debug!("bridge inbox: filtered sender {sender}");
+                continue;
+            }
+
+            let msg = ChannelMessage {
+                id: format!("bridge-{rowid}"),
+                sender: sender.to_string(),
+                reply_target: sender.to_string(),
+                content: text.to_string(),
+                channel: "imessage".to_string(),
+                timestamp,
+                thread_ts: None,
+                interruption_scope_id: None,
+                attachments: vec![],
+            };
+
+            if tx.send(msg).await.is_err() {
+                return Ok(());
+            }
+            sent_any = true;
+        }
+
+        if sent_any {
+            fs::write(path, "").await?;
+            tracing::debug!("bridge inbox: drained and truncated");
+        }
+
+        Ok(())
     }
 }
 
