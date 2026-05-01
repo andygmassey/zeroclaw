@@ -31,3 +31,9 @@ pub mod tools;
 pub mod trust;
 pub mod tunnel;
 pub mod verifiable_intent;
+
+// PWG-specific product bridge. Off by default so the upstream
+// zeroclaw distribution does not pull PWG surface; opted in via
+// `--features pwg-wing-resolution` (see this crate's Cargo.toml).
+#[cfg(feature = "pwg-wing-resolution")]
+pub mod pwg_wing_resolution;

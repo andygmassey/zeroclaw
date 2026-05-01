@@ -319,6 +319,11 @@ fantoccini = ["browser-native"]
 landlock = ["sandbox-landlock"]
 metrics = ["observability-prometheus"]
 
+# PWG product surface. Off by default so upstream zeroclaw
+# distribution stays neutral; ostler-assistant builds opt in via
+# --features pwg-wing-resolution at cargo build time.
+pwg-wing-resolution = ["zeroclaw-runtime/pwg-wing-resolution"]
+
 # CI meta-feature
 ci-all = [
     "agent-runtime",
