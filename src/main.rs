@@ -1488,6 +1488,17 @@ async fn main() -> Result<()> {
                         .await
                     })
                 })),
+                // PWG wing-resolution bridge: poll the gateway queue and
+                // DM the operator via iMessage. Only injected when the
+                // binary was built with `--features pwg-wing-resolution`,
+                // and only when iMessage is actually configured at
+                // daemon-start time -- if the operator skipped the
+                // iMessage channel in the installer wizard, leaving the
+                // start fn `None` keeps the supervisor unspawned rather
+                // than respawning with the same "iMessage not configured"
+                // error every backoff cycle.
+                #[cfg(feature = "pwg-wing-resolution")]
+                pwg_wing_resolution_start: pwg_wing_resolution_start_fn(&config),
             };
             Box::pin(daemon::run(config, host, port, subsystems)).await
         }
@@ -3249,6 +3260,122 @@ async fn run_tui_if_enabled() -> anyhow::Result<()> {
     Box::pin(tui::run_tui_onboarding()).await
 }
 
+/// Build the daemon-side wing-resolution start fn.
+///
+/// Returns `None` when iMessage isn't configured and enabled with at
+/// least one allowed contact -- the bridge needs an iMessage channel to
+/// DM the operator AND a recipient address to target. Returning `None`
+/// here lets the daemon skip the supervisor entirely instead of
+/// respawning a "not configured" error every backoff cycle.
+///
+/// When configured, the start fn loops on the bridge's
+/// `WING_RESOLUTION_POLL_INTERVAL_SECS` (default 60s) and swallows
+/// per-tick errors so a single iMessage send failure doesn't escalate
+/// to a supervisor restart. Hard errors (queue dir IO failure on the
+/// FIRST tick) propagate so the supervisor can mark the component
+/// errored and back off.
+///
+/// V0.1 recipient convention: first entry of `allowed_contacts`. The
+/// `allowed_contacts` list is the inbound allowlist, but in the
+/// self-DM case the operator's own number is naturally both the
+/// inbound sender and the outbound recipient. A dedicated
+/// `[channels.imessage] operator_address` field is the v1.0 cleanup;
+/// flagged as the open question in the wiring PR.
+#[cfg(feature = "pwg-wing-resolution")]
+#[allow(clippy::type_complexity)]
+fn pwg_wing_resolution_start_fn(
+    config: &Config,
+) -> Option<
+    Box<
+        dyn Fn(
+                Config,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>,
+            > + Send
+            + Sync,
+    >,
+> {
+    let imessage_cfg = config.channels.imessage.as_ref()?;
+    if !imessage_cfg.enabled {
+        tracing::info!(
+            "iMessage channel disabled; PWG wing-resolution bridge supervisor not started"
+        );
+        return None;
+    }
+    if imessage_cfg.allowed_contacts.is_empty() {
+        tracing::warn!(
+            "iMessage allowed_contacts empty; PWG wing-resolution bridge has no recipient -- supervisor not started"
+        );
+        return None;
+    }
+
+    Some(Box::new(|config: Config| {
+        Box::pin(async move {
+            use std::time::Duration;
+            use zeroclaw_channels::imessage::IMessageChannel;
+            use zeroclaw_runtime::pwg_wing_resolution::WingResolutionBridge;
+
+            // Re-read iMessage config inside the closure: the
+            // injection-time None-check above is a fast-path; the
+            // closure is the source of truth so a future config
+            // hot-reload would pick up the new value.
+            let Some(imessage_cfg) = config.channels.imessage.as_ref() else {
+                anyhow::bail!(
+                    "iMessage channel disappeared from config between daemon start and wing-resolution spawn"
+                );
+            };
+            let Some(recipient) = imessage_cfg.allowed_contacts.first() else {
+                anyhow::bail!(
+                    "iMessage allowed_contacts empty; cannot address the operator for wing-resolution prompts"
+                );
+            };
+
+            let poll_interval_secs = std::env::var("WING_RESOLUTION_POLL_INTERVAL_SECS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(60);
+
+            let channel = IMessageChannel::new(imessage_cfg.allowed_contacts.clone());
+            let bridge = WingResolutionBridge::from_env(recipient.clone())
+                .with_poll_interval(Duration::from_secs(poll_interval_secs));
+
+            tracing::info!(
+                queue_dir = %bridge.queue_dir().display(),
+                recipient = %bridge.recipient(),
+                poll_interval_secs,
+                "PWG wing-resolution bridge tick loop started"
+            );
+
+            loop {
+                match bridge.run_once(&channel).await {
+                    Ok(report) => {
+                        if report.scanned > 0 {
+                            tracing::info!(
+                                scanned = report.scanned,
+                                delivered = report.delivered,
+                                deferred = report.deferred,
+                                skipped = report.skipped,
+                                malformed = report.malformed,
+                                "wing-resolution tick"
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        // Per-tick errors stay logged-and-continue so a
+                        // transient send failure (Messages.app sleeping,
+                        // recipient briefly unreachable) does not bounce
+                        // the whole supervisor and re-pay startup cost.
+                        // The supervisor only restarts on closure exit;
+                        // we never exit normally.
+                        tracing::warn!(error = %err, "wing-resolution tick failed; continuing");
+                    }
+                }
+                tokio::time::sleep(bridge.poll_interval()).await;
+            }
+        })
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3512,6 +3639,57 @@ mod tests {
         });
 
         assert!((final_temperature - 0.7).abs() < f64::EPSILON);
+    }
+
+    // ── PWG wing-resolution helper ───────────────────────────────────
+    //
+    // The helper short-circuits to `None` whenever the iMessage channel
+    // isn't configured + enabled + populated -- the daemon then skips
+    // the supervisor entirely, which is preferable to respawning a
+    // "not configured" error every backoff cycle.
+
+    #[test]
+    #[cfg(feature = "pwg-wing-resolution")]
+    fn wing_resolution_helper_none_when_imessage_missing() {
+        let config = Config::default();
+        assert!(config.channels.imessage.is_none());
+        assert!(pwg_wing_resolution_start_fn(&config).is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "pwg-wing-resolution")]
+    fn wing_resolution_helper_none_when_imessage_disabled() {
+        use zeroclaw_config::schema::IMessageConfig;
+        let mut config = Config::default();
+        config.channels.imessage = Some(IMessageConfig {
+            enabled: false,
+            allowed_contacts: vec!["+15551234567".to_owned()],
+        });
+        assert!(pwg_wing_resolution_start_fn(&config).is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "pwg-wing-resolution")]
+    fn wing_resolution_helper_none_when_allowed_contacts_empty() {
+        use zeroclaw_config::schema::IMessageConfig;
+        let mut config = Config::default();
+        config.channels.imessage = Some(IMessageConfig {
+            enabled: true,
+            allowed_contacts: vec![],
+        });
+        assert!(pwg_wing_resolution_start_fn(&config).is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "pwg-wing-resolution")]
+    fn wing_resolution_helper_some_when_configured() {
+        use zeroclaw_config::schema::IMessageConfig;
+        let mut config = Config::default();
+        config.channels.imessage = Some(IMessageConfig {
+            enabled: true,
+            allowed_contacts: vec!["+15551234567".to_owned()],
+        });
+        assert!(pwg_wing_resolution_start_fn(&config).is_some());
     }
 }
 

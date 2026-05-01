@@ -321,8 +321,14 @@ metrics = ["observability-prometheus"]
 
 # PWG product surface. Off by default so upstream zeroclaw
 # distribution stays neutral; ostler-assistant builds opt in via
-# --features pwg-wing-resolution at cargo build time.
-pwg-wing-resolution = ["zeroclaw-runtime/pwg-wing-resolution"]
+# --features pwg-wing-resolution at cargo build time. Requires
+# channel-imessage because the bridge DMs the operator over
+# iMessage; building with --no-default-features would otherwise
+# leave the daemon helper unable to construct an IMessageChannel.
+pwg-wing-resolution = [
+    "zeroclaw-runtime/pwg-wing-resolution",
+    "channel-imessage",
+]
 
 # CI meta-feature
 ci-all = [

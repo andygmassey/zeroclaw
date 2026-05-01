@@ -80,6 +80,22 @@ pub struct DaemonSubsystems {
                 + Sync,
         >,
     >,
+    /// Start the PWG wing-resolution bridge tick loop.
+    ///
+    /// Injected by the binary when the `pwg-wing-resolution` feature is on,
+    /// because the bridge needs an iMessage `Channel` impl and the runtime
+    /// crate cannot depend on `zeroclaw-channels` (the dep graph runs the
+    /// other way). Off-feature builds leave this `None` and skip the
+    /// supervisor entirely so the upstream zeroclaw distribution stays
+    /// neutral.
+    #[cfg(feature = "pwg-wing-resolution")]
+    pub pwg_wing_resolution_start: Option<
+        Box<
+            dyn Fn(Config) -> std::pin::Pin<Box<dyn Future<Output = Result<()>> + Send>>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 pub async fn run(
@@ -206,6 +222,36 @@ pub async fn run(
     } else {
         crate::health::mark_component_ok("scheduler");
         tracing::info!("Cron disabled; scheduler supervisor not started");
+    }
+
+    // PWG wing-resolution bridge: poll the gateway-emitted queue and DM
+    // the operator via iMessage. Only spawned when the binary was built
+    // with `--features pwg-wing-resolution` AND the feature wired the
+    // start fn into DaemonSubsystems. The supervisor handles restart on
+    // unhandled error; the closure itself swallows transient per-tick
+    // errors and just logs them, so a single iMessage send failure does
+    // not escalate to "wait initial_backoff then restart".
+    #[cfg(feature = "pwg-wing-resolution")]
+    {
+        if let Some(wing_start) = subsystems.pwg_wing_resolution_start {
+            let wing_cfg = config.clone();
+            let wing_start = std::sync::Arc::new(wing_start);
+            handles.push(spawn_component_supervisor(
+                "pwg-wing-resolution",
+                initial_backoff,
+                max_backoff,
+                move || {
+                    let cfg = wing_cfg.clone();
+                    let start = wing_start.clone();
+                    async move { start(cfg).await }
+                },
+            ));
+        } else {
+            crate::health::mark_component_ok("pwg-wing-resolution");
+            tracing::info!(
+                "PWG wing-resolution feature on but no start fn injected; bridge disabled"
+            );
+        }
     }
 
     println!("🧠 ZeroClaw daemon started");
