@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Hardened Runtime entitlements for ostler-assistant.
+
+    The daemon is signed with `codesign` plus the `runtime`
+    option (release/sign-and-notarize.sh applies that flag) which
+    enables the Hardened Runtime. Hardened Runtime is restrictive
+    by default; we EXPLICITLY enumerate every restriction we
+    accept rather than emitting an empty plist, so a future
+    reviewer can see at a glance which capabilities the daemon
+    does and does not require.
+
+    Codebase audit (2026-05-02 against ostler-ai/ostler-assistant
+    main):
+
+      No JIT: a grep for `PROT_EXEC|jit|JIT` returns only
+        "jitter" string matches in backoff helpers (qq.rs,
+        nostr.rs, slack.rs); no executable-memory allocation.
+        Therefore allow-jit and allow-unsigned-executable-memory
+        stay FALSE (default secure).
+
+      No dyld injection: a grep for `dlopen|libloading::Library`
+        returns nothing. We link statically against bundled deps
+        and dynamically against system libs only.
+        Therefore disable-library-validation and
+        allow-dyld-environment-variables stay FALSE (default
+        secure).
+
+      Network access: reqwest + tokio TcpListener (gateway).
+        No App Sandbox entitlement needed; network access is
+        only sandbox-gated, not Hardened-Runtime-gated.
+
+      Apple Events to Messages.app: we shell out to /usr/bin/
+        osascript via tokio::process::Command (see
+        crates/zeroclaw-channels/src/imessage.rs). osascript is
+        the entitled binary; our process is the parent. No
+        com.apple.security.automation.apple-events needed; the
+        operator grants Automation permission to osascript via
+        System Settings on first run.
+
+      File access: ~/Library/Messages/chat.db (iMessage),
+        ~/Library/Mail (email-ingest). Both are TCC-protected
+        (Full Disk Access, not entitlement-gated). Operator
+        grants FDA via System Settings.
+
+      Keychain: a grep for `SecKeychain|kSecClass` returns
+        nothing in the workspace. Secrets are persisted via
+        the in-tree ChaCha20-Poly1305 (`enc2:`) scheme in
+        crates/zeroclaw-config/src/secrets.rs, not via the
+        macOS Keychain. No entitlement needed.
+
+    If a future change adds JIT (provider runtime), dlopen
+    (plugin loader), or in-process AppleEvents, flip the
+    relevant key here and re-sign. The release/SIGNING.md
+    runbook lists the trip-wires.
+
+    British English throughout.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <false/>
+
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <false/>
+
+    <key>com.apple.security.cs.disable-executable-page-protection</key>
+    <false/>
+</dict>
+</plist>

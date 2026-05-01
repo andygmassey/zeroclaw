@@ -88,6 +88,19 @@ cp "$BIN_PATH" "$STAGE/ostler-assistant"
 strip "$STAGE/ostler-assistant"
 chmod 755 "$STAGE/ostler-assistant"
 
+# Sign + notarise BEFORE tarring. Strip rewrites the Mach-O so
+# any signature applied earlier would be invalidated; signing
+# after strip is the only correct order.
+#
+# When OSTLER_SIGNING_IDENTITY is unset the script logs "skipping"
+# and exits 0, so the local build keeps producing the same v0.1
+# unsigned tarball as today. Once a Developer ID certificate is
+# enrolled and the env vars are populated, this same script
+# produces a signed + notarised binary at the same artefact name
+# (downstream install.sh untouched, customer-facing tarball name
+# unchanged).
+"$REPO_ROOT/release/sign-and-notarize.sh" "$STAGE/ostler-assistant"
+
 ARCHIVE="ostler-assistant-${TARGET}-v${VERSION}.tar.gz"
 tar czf "$ARCHIVE" -C "$STAGE" ostler-assistant
 shasum -a 256 "$ARCHIVE" | tee "${ARCHIVE}.sha256"

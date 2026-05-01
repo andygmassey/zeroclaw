@@ -116,8 +116,34 @@ jobs:
       # Customer-facing rename happens at tar time. The Cargo.toml
       # `[[bin]]` stays as `zeroclaw` to keep upstream Dockerfiles
       # / install.sh / marketplace working unchanged.
-      - name: Strip and tar
+      #
+      # Sign + notarise step (release/sign-and-notarize.sh) runs
+      # AFTER strip and BEFORE tar. The script no-ops when
+      # OSTLER_SIGNING_IDENTITY is empty (today's behaviour: the
+      # tarball ships unsigned). When the secret is populated,
+      # the signed + notarised binary lands at the same artefact
+      # name with no downstream installer changes required.
+      - name: Strip, sign, and tar
         id: artifact
+        env:
+          # Empty when the repo secret is unset; the signing
+          # script treats empty as "skip signing" and exits 0.
+          OSTLER_SIGNING_IDENTITY: ${{ secrets.OSTLER_SIGNING_IDENTITY }}
+          # Notary auth -- block A (App Store Connect API key,
+          # recommended): the script picks this when all three
+          # are populated. The .p8 is stored as base64 in the
+          # secret; we decode to a runner-local tempfile below.
+          OSTLER_NOTARY_API_KEY_BASE64: ${{ secrets.OSTLER_NOTARY_API_KEY_BASE64 }}
+          OSTLER_NOTARY_API_KEY_ID: ${{ secrets.OSTLER_NOTARY_API_KEY_ID }}
+          OSTLER_NOTARY_API_ISSUER_ID: ${{ secrets.OSTLER_NOTARY_API_ISSUER_ID }}
+          # Notary auth -- block B (app-specific password,
+          # fallback): the script picks this when block A is
+          # empty and these three are populated. Operators
+          # should populate exactly one block; the script
+          # refuses to proceed if both are populated.
+          OSTLER_NOTARY_APPLE_ID: ${{ secrets.OSTLER_NOTARY_APPLE_ID }}
+          OSTLER_NOTARY_PASSWORD: ${{ secrets.OSTLER_NOTARY_PASSWORD }}
+          OSTLER_NOTARY_TEAM_ID: ${{ secrets.OSTLER_NOTARY_TEAM_ID }}
         run: |
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
@@ -126,12 +152,56 @@ jobs:
           strip "$stage/ostler-assistant"
           chmod 755 "$stage/ostler-assistant"
 
+          # Decode the API-key .p8 from base64 secret to a
+          # runner-local tempfile when block A is populated.
+          # The mktemp dir is wiped when the runner shuts down;
+          # the file never lands in the repo or artefacts.
+          #
+          # Cleanup runs in a `trap ... EXIT`, registered BEFORE
+          # the signing step. If sign-and-notarize.sh fails or
+          # crashes (notary timeout, network blip, codesign
+          # permission error, set -e propagation), the trap
+          # still fires on shell exit and removes the decoded
+          # key file. A bare `if [ -f "$KEY" ]; rm` after the
+          # script call would skip on those failure paths; the
+          # trap is the only shape that runs on every exit
+          # path. Same hygiene pattern as the internal
+          # NOTARY_DIR trap inside sign-and-notarize.sh.
+          if [ -n "${OSTLER_NOTARY_API_KEY_BASE64:-}" ]; then
+              key_file="$(mktemp -t ostler-notary-key.XXXXXXXX.p8)"
+              # Register cleanup BEFORE writing the key bytes:
+              # if the base64 decode itself fails the trap still
+              # removes the empty/partial file.
+              trap 'rm -f "${key_file:-}"' EXIT
+              printf '%s' "$OSTLER_NOTARY_API_KEY_BASE64" | base64 -d > "$key_file"
+              chmod 0600 "$key_file"
+              export OSTLER_NOTARY_API_KEY_FILE="$key_file"
+              # Wipe the base64 from this step's environment so
+              # subsequent commands don't see it. The tempfile
+              # is the only remaining handle on the key
+              # material.
+              unset OSTLER_NOTARY_API_KEY_BASE64
+          fi
+
+          ./release/sign-and-notarize.sh "$stage/ostler-assistant"
+
           archive="ostler-assistant-aarch64-apple-darwin-v${version}.tar.gz"
           tar czf "$archive" -C "$stage" ostler-assistant
 
           # Sidecar SHA-256 so the installer can verify the download
           # before extracting. shasum is shipped on macOS by default.
           shasum -a 256 "$archive" | tee "${archive}.sha256"
+
+          # Record whether the build was signed so the release notes
+          # rendering step below can emit the right wording. We grep
+          # `codesign -dv` for the Developer-ID prefix; ad-hoc and
+          # unsigned binaries return empty.
+          signed_status="unsigned"
+          if codesign -dv --verbose=4 "$stage/ostler-assistant" 2>&1 \
+              | grep -qE "Authority=Developer ID Application"; then
+              signed_status="signed"
+          fi
+          echo "signed_status=$signed_status" >> "$GITHUB_OUTPUT"
 
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "checksum=${archive}.sha256" >> "$GITHUB_OUTPUT"
@@ -155,11 +225,16 @@ jobs:
           body: |
             ## Ostler assistant v${{ steps.version.outputs.version }} (Apple Silicon)
 
-            **Unsigned binary**: this release ships unsigned. macOS
+            **Signing status**: ${{ steps.artifact.outputs.signed_status }}.
+            When the build runs without `OSTLER_SIGNING_IDENTITY` set
+            (today's default until a Developer ID certificate is
+            enrolled) the tarball ships unsigned and macOS
             Gatekeeper will quarantine the extracted binary on first
-            run; the operator must explicitly allow it via System
-            Settings -> Privacy & Security. Code-signing is queued
-            under task #136 and lands in v0.2.
+            run; CM051's installer clears the quarantine xattr after
+            SHA-256 verification. Once the signing secret is
+            populated, the build emits a Hardened-Runtime + notarised
+            binary and CM051 detects this via `codesign -dv` to skip
+            the quarantine clearing.
 
             **Architecture**: arm64 (Apple Silicon). Intel Macs are
             not supported in v0.1.
