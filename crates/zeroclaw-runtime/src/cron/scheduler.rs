@@ -72,6 +72,14 @@ pub async fn run(config: Config, event_tx: EventBroadcast) -> Result<()> {
         Err(e) => tracing::warn!("Failed to sync declarative cron jobs: {e}"),
     }
 
+    // Piece E: warn on declarative jobs that opt into the legacy
+    // silent-failure semantic. The default flipped to false in
+    // piece E -- explicit `true` is now an opt-in choice the
+    // operator should be aware of. The cron-delivery posture
+    // marker (piece D) still fires regardless of `best_effort`,
+    // but per-tick cron history will hide the failure.
+    warn_on_best_effort_declarative_jobs(&jobs_with_builtin);
+
     // ── Startup catch-up: run ALL overdue jobs before entering the
     //    normal polling loop. The regular loop is capped by `max_tasks`,
     //    which could leave some overdue jobs waiting across many cycles
@@ -100,6 +108,43 @@ pub async fn run(config: Config, event_tx: EventBroadcast) -> Result<()> {
 
         process_due_jobs(&config, &security, jobs, SCHEDULER_COMPONENT, &event_tx).await;
     }
+}
+
+/// Inspect the declarative cron jobs and emit a `tracing::warn` for
+/// each one that opts into legacy silent-failure semantics (piece E).
+/// Pulled out so unit tests can exercise the predicate without
+/// running the full scheduler.
+pub(crate) fn warn_on_best_effort_declarative_jobs(
+    jobs: &[CronJobDecl],
+) -> Vec<String> {
+    let mut warned: Vec<String> = Vec::new();
+    for job in jobs {
+        let Some(delivery) = job.delivery.as_ref() else {
+            continue;
+        };
+        if !delivery.mode.eq_ignore_ascii_case("announce") {
+            continue;
+        }
+        if !delivery.best_effort {
+            continue;
+        }
+        let channel = delivery
+            .channel
+            .as_deref()
+            .unwrap_or("(unset)");
+        tracing::warn!(
+            job_id = %job.id,
+            channel = %channel,
+            "declarative cron job opts into best_effort=true: \
+             delivery failures will be hidden in per-tick cron \
+             history. The cron-delivery posture marker still \
+             fires (zeroclaw doctor), but if you want failures \
+             to surface in cron history too, set \
+             best_effort = false."
+        );
+        warned.push(job.id.clone());
+    }
+    warned
 }
 
 /// Fetch **all** overdue jobs (ignoring `max_tasks`) and execute them.
@@ -2030,6 +2075,114 @@ mod tests {
         assert!(not_ready.iter().any(|s| s.contains("matrix")));
         assert!(not_ready.iter().any(|s| s.contains("alerts")));
         assert!(!not_ready.iter().any(|s| s.contains("telegram")));
+    }
+
+    // ── best_effort warn-on-load (piece E) ─────────────────────
+
+    fn declarative_announce_job(
+        id: &str,
+        best_effort: bool,
+    ) -> CronJobDecl {
+        CronJobDecl {
+            id: id.into(),
+            name: None,
+            job_type: "shell".into(),
+            schedule: CronScheduleDecl::Cron {
+                expr: "0 9 * * *".into(),
+                tz: None,
+            },
+            command: Some("echo brief".into()),
+            prompt: None,
+            enabled: true,
+            model: None,
+            allowed_tools: None,
+            uses_memory: true,
+            session_target: None,
+            delivery: Some(zeroclaw_config::schema::DeliveryConfigDecl {
+                mode: "announce".into(),
+                channel: Some("whatsapp".into()),
+                to: Some("123456".into()),
+                best_effort,
+                max_wait_secs: 120,
+                startup_grace_secs: 60,
+            }),
+        }
+    }
+
+    #[test]
+    fn warn_on_best_effort_returns_ids_for_explicit_true() {
+        let jobs = vec![
+            declarative_announce_job("morning-brief", true),
+            declarative_announce_job("evening-brief", false),
+            declarative_announce_job("ops-alerts", true),
+        ];
+        let warned = warn_on_best_effort_declarative_jobs(&jobs);
+        assert_eq!(warned.len(), 2);
+        assert!(warned.contains(&"morning-brief".into()));
+        assert!(warned.contains(&"ops-alerts".into()));
+        assert!(!warned.contains(&"evening-brief".into()));
+    }
+
+    #[test]
+    fn warn_on_best_effort_silent_when_all_false() {
+        let jobs = vec![
+            declarative_announce_job("a", false),
+            declarative_announce_job("b", false),
+        ];
+        let warned = warn_on_best_effort_declarative_jobs(&jobs);
+        assert!(warned.is_empty());
+    }
+
+    #[test]
+    fn warn_on_best_effort_skips_non_announce() {
+        let mut job = declarative_announce_job("backup", true);
+        if let Some(d) = job.delivery.as_mut() {
+            d.mode = "none".into();
+        }
+        let warned = warn_on_best_effort_declarative_jobs(&[job]);
+        assert!(warned.is_empty());
+    }
+
+    #[test]
+    fn warn_on_best_effort_skips_jobs_without_delivery() {
+        let mut job = declarative_announce_job("backup", true);
+        job.delivery = None;
+        let warned = warn_on_best_effort_declarative_jobs(&[job]);
+        assert!(warned.is_empty());
+    }
+
+    #[test]
+    fn declarative_best_effort_default_is_false() {
+        // Regression check: piece E flipped the schema default
+        // from true to false. New operators get fail-loud unless
+        // they opt in to best_effort = true explicitly.
+        assert!(!zeroclaw_config::schema::default_best_effort_decl());
+    }
+
+    #[test]
+    fn declarative_delivery_toml_without_best_effort_defaults_to_false() {
+        // End-to-end TOML deserialisation: confirm the serde
+        // default kicks in and operators opting into best_effort
+        // must do so explicitly.
+        let toml_src = r#"
+            mode = "announce"
+            channel = "whatsapp"
+            to = "123456"
+        "#;
+        let decl: zeroclaw_config::schema::DeliveryConfigDecl =
+            toml::from_str(toml_src).unwrap();
+        assert!(!decl.best_effort);
+        // And explicit true still parses as true (Andy's
+        // existing config keeps its semantic).
+        let toml_explicit = r#"
+            mode = "announce"
+            channel = "whatsapp"
+            to = "123456"
+            best_effort = true
+        "#;
+        let decl: zeroclaw_config::schema::DeliveryConfigDecl =
+            toml::from_str(toml_explicit).unwrap();
+        assert!(decl.best_effort);
     }
 
     #[tokio::test]

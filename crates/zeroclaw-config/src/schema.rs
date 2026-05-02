@@ -6245,8 +6245,21 @@ pub struct DeliveryConfigDecl {
     /// Target/recipient identifier.
     #[serde(default)]
     pub to: Option<String>,
-    /// Best-effort delivery. Default: `true`.
-    #[serde(default = "default_true")]
+    /// Best-effort delivery. When `true`, a delivery failure is
+    /// logged but the cron run is reported as success; when
+    /// `false`, the run surfaces the delivery error in cron
+    /// history.
+    ///
+    /// Default flipped to `false` in piece E of
+    /// /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md so
+    /// new operators get fail-loud by default. Operators who
+    /// want the legacy silent-failure semantic must set
+    /// `best_effort = true` explicitly; piece E also emits a
+    /// startup warning in that case so the implication is
+    /// visible. Failures additionally surface via the
+    /// `cron-delivery` posture marker (piece D) regardless of
+    /// `best_effort`.
+    #[serde(default = "default_best_effort_decl")]
     pub best_effort: bool,
     /// Maximum seconds to wait for the channel to report
     /// `health_check() == true` before giving up on a delivery.
@@ -6271,6 +6284,10 @@ pub struct DeliveryConfigDecl {
 
 pub fn default_max_wait_secs_decl() -> u64 {
     120
+}
+
+pub fn default_best_effort_decl() -> bool {
+    false
 }
 
 pub fn default_startup_grace_secs_decl() -> u64 {
