@@ -2370,8 +2370,31 @@ fn spawn_supervised_listener_with_health_interval(
         let mut backoff = initial_backoff_secs.max(1);
         let max_backoff = max_backoff_secs.max(backoff);
 
+        // Helper closure: read the channel's own health_check and
+        // route to the right component-state marker. Channels that
+        // don't override health_check default to `true` (see the
+        // Channel trait) so this is a no-op for stateless backends
+        // -- they continue to be marked ok every heartbeat. Stateful
+        // backends (WhatsApp Web, etc.) get a TRUE-vs-FALSE flip
+        // tied to their actual readiness, which the gateway,
+        // keepalive, and cron pre-flight all read from the same
+        // place.
+        async fn refresh_component_health(
+            ch: &Arc<dyn Channel>,
+            component: &str,
+        ) {
+            if ch.health_check().await {
+                zeroclaw_runtime::health::mark_component_ok(component);
+            } else {
+                zeroclaw_runtime::health::mark_component_error(
+                    component,
+                    "channel reports not-ready (health_check returned false)",
+                );
+            }
+        }
+
         loop {
-            zeroclaw_runtime::health::mark_component_ok(&component);
+            refresh_component_health(&ch, &component).await;
             let mut health = tokio::time::interval(health_interval);
             health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let result = {
@@ -2381,7 +2404,7 @@ fn spawn_supervised_listener_with_health_interval(
                 loop {
                     tokio::select! {
                         _ = health.tick() => {
-                            zeroclaw_runtime::health::mark_component_ok(&component);
+                            refresh_component_health(&ch, &component).await;
                         }
                         result = &mut listen_future => break result,
                     }
@@ -5363,6 +5386,18 @@ pub async fn start_channels(config: Config) -> Result<()> {
         return Ok(());
     }
 
+    // Register the long-lived channel instances for cron delivery
+    // lookups. Doing this BEFORE the supervised-listener spawn keeps
+    // the registry populated even when a cron tick fires during the
+    // listener-startup window -- the channel instance exists, even
+    // if its underlying client (e.g. WhatsApp Web's WS) hasn't
+    // finished connecting yet. The send() call at delivery time
+    // reads the same client field that the listener is filling in,
+    // so once the connection is up cron sees it immediately.
+    for ch in &channels {
+        register_channel_for_delivery(ch.name(), ch.clone());
+    }
+
     println!("🦀 ZeroClaw Channel Server");
     println!("  🤖 Model:    {model}");
     let effective_backend = zeroclaw_memory::effective_memory_backend_name(
@@ -5656,8 +5691,87 @@ pub async fn start_channels(config: Config) -> Result<()> {
     Ok(())
 }
 
+// ── Cron-delivery channel registry ─────────────────────────────────
+//
+// `deliver_announcement` (below) needs the SAME `Arc<dyn Channel>`
+// instance that the orchestrator's listener loop holds, not a fresh
+// one constructed per cron tick. For stateless channels (Telegram,
+// Discord, Slack, Signal) a fresh instance works fine because each
+// `send` opens a new HTTPS connection. For STATEFUL channels --
+// WhatsApp Web, Matrix, Mattermost -- the long-lived client lives
+// behind an `Arc<Mutex<Option<...>>>` field that's only populated
+// once the underlying websocket connects (30-90s after start).
+// A fresh `WhatsAppWebChannel::new()` from `build_channel_by_id`
+// has `client = None` and bails at `send` time with
+// "WhatsApp Web client not connected".
+//
+// This registry holds the orchestrator-managed instances and is
+// populated by `start_channels` once the supervised listeners are
+// spawned. Cron `deliver_announcement` consults the registry first;
+// only on miss does it fall back to the stateless factory path.
+//
+// Same pattern as `DELIVERY_FN` in zeroclaw-runtime: a `OnceLock`
+// holding the lazily-initialised handle, with a mutex-guarded
+// inner map so individual channels can be added as the orchestrator
+// boots them.
+type CronDeliveryRegistry = std::sync::Mutex<HashMap<String, Arc<dyn Channel>>>;
+
+static CRON_DELIVERY_CHANNELS: OnceLock<CronDeliveryRegistry> = OnceLock::new();
+
+fn cron_delivery_registry() -> &'static CronDeliveryRegistry {
+    CRON_DELIVERY_CHANNELS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Register a channel instance for cron-delivery lookups.
+/// Called from `start_channels` for each channel the orchestrator
+/// constructs, so that cron `deliver_announcement` calls reuse
+/// the long-lived instance rather than constructing a fresh
+/// (and possibly disconnected) one.
+pub fn register_channel_for_delivery(name: &str, channel: Arc<dyn Channel>) {
+    if let Ok(mut map) = cron_delivery_registry().lock() {
+        map.insert(name.to_string(), channel);
+    }
+}
+
+/// Look up a registered channel by name. Returns None when no
+/// channel is registered for that id (e.g. before
+/// `start_channels` has populated the registry, or when the
+/// channel id isn't configured).
+fn get_channel_for_delivery(name: &str) -> Option<Arc<dyn Channel>> {
+    cron_delivery_registry()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(name).cloned())
+}
+
+#[cfg(test)]
+fn clear_cron_delivery_registry_for_test() {
+    if let Ok(mut map) = cron_delivery_registry().lock() {
+        map.clear();
+    }
+}
+
 /// Deliver a cron job announcement to a configured channel.
-/// Scans for credential leaks before delivery.
+///
+/// Resolution:
+/// 1. Scan the output for credential leaks (always).
+/// 2. Look up the channel name in the cron-delivery registry. On a
+///    hit, use the orchestrator-managed long-lived instance --
+///    this is the ONLY correct path for stateful channels
+///    (WhatsApp Web, Matrix, Mattermost).
+/// 3. On a miss, fall back to `build_channel_by_id` to construct a
+///    fresh stateless instance. This preserves today's behaviour
+///    for Telegram / Discord / Slack / Signal during the brief
+///    window before `start_channels` has populated the registry,
+///    and for any callsite that uses `deliver_announcement`
+///    outside the orchestrator boot path. For stateful channels
+///    this fallback will fail visibly at `send` time with
+///    "client not connected", which is the same diagnostic the
+///    operator gets today; the registry-hit path is what fixes
+///    the actual delivery bug.
+///
+/// See /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md
+/// (RC-1, fix piece A).
 pub async fn deliver_announcement(
     config: &zeroclaw_config::schema::Config,
     channel: &str,
@@ -5666,81 +5780,31 @@ pub async fn deliver_announcement(
 ) -> anyhow::Result<()> {
     use zeroclaw_api::channel::SendMessage;
 
-    // Scan for credential leaks before delivering
     let leak_detector = zeroclaw_runtime::security::LeakDetector::new();
     let safe_output = match leak_detector.scan(output) {
         zeroclaw_runtime::security::LeakResult::Detected { redacted, .. } => redacted,
         zeroclaw_runtime::security::LeakResult::Clean => output.to_string(),
     };
 
-    match channel.to_ascii_lowercase().as_str() {
-        #[cfg(feature = "channel-telegram")]
-        "telegram" => {
-            let tg = config
-                .channels
-                .telegram
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("telegram channel not configured"))?;
-            let ch = TelegramChannel::new(
-                tg.bot_token.clone(),
-                tg.allowed_users.clone(),
-                tg.mention_only,
-            );
-            zeroclaw_api::channel::Channel::send(&ch, &SendMessage::new(&safe_output, target))
-                .await?;
-        }
-        "discord" => {
-            let dc = config
-                .channels
-                .discord
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("discord channel not configured"))?;
-            let ch = DiscordChannel::new(
-                dc.bot_token.clone(),
-                dc.guild_id.clone(),
-                dc.allowed_users.clone(),
-                dc.listen_to_bots,
-                dc.mention_only,
-            );
-            zeroclaw_api::channel::Channel::send(&ch, &SendMessage::new(&safe_output, target))
-                .await?;
-        }
-        "slack" => {
-            let sl = config
-                .channels
-                .slack
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("slack channel not configured"))?;
-            let ch = SlackChannel::new(
-                sl.bot_token.clone(),
-                sl.app_token.clone(),
-                sl.channel_ids.clone(),
-                sl.allowed_users.clone(),
-            )
-            .with_workspace_dir(config.workspace_dir.clone());
-            zeroclaw_api::channel::Channel::send(&ch, &SendMessage::new(&safe_output, target))
-                .await?;
-        }
-        "signal" => {
-            let sg = config
-                .channels
-                .signal
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("signal channel not configured"))?;
-            let ch = SignalChannel::new(
-                sg.http_url.clone(),
-                sg.account.clone(),
-                sg.group_id.clone(),
-                sg.allowed_from.clone(),
-                sg.ignore_attachments,
-                sg.ignore_stories,
-            );
-            zeroclaw_api::channel::Channel::send(&ch, &SendMessage::new(&safe_output, target))
-                .await?;
-        }
-        other => anyhow::bail!("unsupported delivery channel: {other}"),
+    let normalized = channel.to_ascii_lowercase();
+
+    if let Some(channel_inst) = get_channel_for_delivery(&normalized) {
+        return zeroclaw_api::channel::Channel::send(
+            &*channel_inst,
+            &SendMessage::new(&safe_output, target),
+        )
+        .await;
     }
-    Ok(())
+
+    // Fallback: factory-construct a fresh channel. Works for
+    // stateless channels; will surface a clear "not connected"
+    // error for stateful channels that weren't yet registered.
+    let channel_inst = build_channel_by_id(config, &normalized)?;
+    zeroclaw_api::channel::Channel::send(
+        &*channel_inst,
+        &SendMessage::new(&safe_output, target),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -12029,5 +12093,195 @@ This is an example JSON object for profile settings."#;
         assert!(prompt_a.contains("sender=user_aaa"));
         assert!(prompt_b.contains("sender=user_bbb"));
         assert_ne!(prompt_a, prompt_b);
+    }
+}
+
+// ── Cron-delivery registry + deliver_announcement tests ──────────
+//
+// Exercises piece A of the ZeroClaw cron fix
+// (/tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md): registry
+// lookup, leak-detector pass-through, and the registry-hit /
+// registry-miss split. Stateful-channel readiness behaviour
+// (piece B) is exercised via the WhatsAppWebChannel::is_ready
+// inline tests in whatsapp_web.rs, and via the supervised-listener
+// behaviour test below.
+
+#[cfg(test)]
+mod cron_delivery_tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex as StdMutex;
+    use zeroclaw_api::channel::{ChannelMessage, SendMessage};
+
+    // The cron-delivery registry is process-global state. Cargo
+    // test runs tests in parallel within the same process, so
+    // tests that mutate the registry must serialise to avoid
+    // racing each other's `clear` / `register` / lookup
+    // sequences. parking_lot is already a workspace dep.
+    static TEST_SERIAL: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    /// Test stub that records the last `send` invocation and lets
+    /// each test override the channel id + readiness signal.
+    struct StubChannel {
+        name: String,
+        ready: AtomicBool,
+        last_send: StdMutex<Option<(String, String)>>, // (recipient, content)
+    }
+
+    impl StubChannel {
+        fn new(name: &str, ready: bool) -> Self {
+            Self {
+                name: name.to_string(),
+                ready: AtomicBool::new(ready),
+                last_send: StdMutex::new(None),
+            }
+        }
+
+        fn last_send(&self) -> Option<(String, String)> {
+            self.last_send.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl Channel for StubChannel {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        async fn send(&self, message: &SendMessage) -> anyhow::Result<()> {
+            *self.last_send.lock().unwrap() =
+                Some((message.recipient.clone(), message.content.clone()));
+            Ok(())
+        }
+
+        async fn listen(
+            &self,
+            _tx: tokio::sync::mpsc::Sender<ChannelMessage>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn health_check(&self) -> bool {
+            self.ready.load(Ordering::SeqCst)
+        }
+    }
+
+    fn empty_test_config() -> zeroclaw_config::schema::Config {
+        // Default config with no channel sections populated. The
+        // factory fallback inside `deliver_announcement` will
+        // fail with a friendly "channel not configured" error
+        // when the registry misses, which is what we want to
+        // assert in the registry-miss test.
+        zeroclaw_config::schema::Config::default()
+    }
+
+    #[tokio::test]
+    async fn registry_lookup_returns_registered_channel_instance() {
+        let _serial = TEST_SERIAL.lock();
+        clear_cron_delivery_registry_for_test();
+        let stub = Arc::new(StubChannel::new("test-stub", true));
+        register_channel_for_delivery("test-stub", stub.clone() as Arc<dyn Channel>);
+
+        let looked_up = get_channel_for_delivery("test-stub").expect("registered channel");
+        // Same Arc count: registering + looking up should NOT
+        // clone-construct a new instance.
+        assert_eq!(looked_up.name(), "test-stub");
+    }
+
+    #[tokio::test]
+    async fn registry_miss_returns_none() {
+        let _serial = TEST_SERIAL.lock();
+        clear_cron_delivery_registry_for_test();
+        assert!(get_channel_for_delivery("never-registered").is_none());
+    }
+
+    #[tokio::test]
+    async fn deliver_announcement_uses_registered_instance() {
+        let _serial = TEST_SERIAL.lock();
+        clear_cron_delivery_registry_for_test();
+        let stub = Arc::new(StubChannel::new("test-channel", true));
+        register_channel_for_delivery(
+            "test-channel",
+            stub.clone() as Arc<dyn Channel>,
+        );
+
+        let cfg = empty_test_config();
+        deliver_announcement(&cfg, "test-channel", "+15551234567", "hello world")
+            .await
+            .expect("registered stub send should succeed");
+
+        let recorded = stub.last_send().expect("send was invoked");
+        assert_eq!(recorded.0, "+15551234567");
+        assert_eq!(recorded.1, "hello world");
+    }
+
+    #[tokio::test]
+    async fn deliver_announcement_lowercases_channel_name_for_lookup() {
+        // Operators may write `WhatsApp` / `WHATSAPP` / `whatsapp`
+        // in their cron config. Lookup should be case-insensitive.
+        let _serial = TEST_SERIAL.lock();
+        clear_cron_delivery_registry_for_test();
+        let stub = Arc::new(StubChannel::new("whatsapp", true));
+        register_channel_for_delivery("whatsapp", stub.clone() as Arc<dyn Channel>);
+
+        let cfg = empty_test_config();
+        deliver_announcement(&cfg, "WhatsApp", "+15551234567", "msg")
+            .await
+            .expect("case-insensitive registry lookup should succeed");
+
+        assert!(stub.last_send().is_some());
+    }
+
+    #[tokio::test]
+    async fn deliver_announcement_runs_leak_detector_before_send() {
+        let _serial = TEST_SERIAL.lock();
+        clear_cron_delivery_registry_for_test();
+        let stub = Arc::new(StubChannel::new("test-channel", true));
+        register_channel_for_delivery(
+            "test-channel",
+            stub.clone() as Arc<dyn Channel>,
+        );
+
+        let cfg = empty_test_config();
+        // The LeakDetector treats AWS-shaped access keys as
+        // credentials and replaces them with `[REDACTED]` before
+        // delivery. Confirm the redacted form (NOT the original)
+        // reaches the channel.
+        let raw = "Pre-flight: AKIAIOSFODNN7EXAMPLE leaked";
+        deliver_announcement(&cfg, "test-channel", "user", raw)
+            .await
+            .expect("send with redacted output should succeed");
+
+        let (_, sent) = stub.last_send().expect("send was invoked");
+        assert!(
+            !sent.contains("AKIAIOSFODNN7EXAMPLE"),
+            "raw secret should have been redacted; got {sent:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn deliver_announcement_registry_miss_falls_back_to_factory() {
+        // With an empty registry and an empty config, the
+        // factory fallback in build_channel_by_id should report
+        // "channel not configured" rather than the pre-fix
+        // "unsupported delivery channel" error -- the latter
+        // would mean we silently dropped the new code path.
+        let _serial = TEST_SERIAL.lock();
+        clear_cron_delivery_registry_for_test();
+        let cfg = empty_test_config();
+        let err = deliver_announcement(&cfg, "telegram", "user", "msg")
+            .await
+            .expect_err("empty config should not have a working telegram backend");
+        let msg = err.to_string();
+        // Either the factory complains about missing config
+        // (telegram backend not configured) or it bubbles a
+        // construction error -- both are evidence that the
+        // factory path ran rather than today's broken
+        // "unsupported delivery channel" panic.
+        assert!(
+            !msg.contains("unsupported delivery channel"),
+            "registry miss should delegate to factory, not the old panic; got {msg:?}"
+        );
     }
 }

@@ -99,6 +99,24 @@ pub struct WhatsAppWebChannel {
 }
 
 impl WhatsAppWebChannel {
+    /// Single source of truth for WhatsApp Web readiness.
+    /// Returns true once the underlying WS client has finished
+    /// connecting (matches the field `send` actually checks
+    /// before dispatch). Use this from the supervised listener's
+    /// heartbeat probe and from cron pre-flight gates -- earlier
+    /// versions of `health_check` consulted `bot_handle.is_some()`
+    /// instead, which flips to `true` the moment the bot task
+    /// spawns (well before WS handshake), so the gateway and
+    /// keepalive read "channel ok" while a 09:00 cron tick was
+    /// still hitting "client not connected" inside `send`.
+    ///
+    /// See /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md
+    /// (RC-2, fix piece B).
+    #[cfg(feature = "whatsapp-web")]
+    pub async fn is_ready(&self) -> bool {
+        self.client.lock().is_some()
+    }
+
     /// Create a new WhatsApp Web channel
     ///
     /// # Arguments
@@ -1564,8 +1582,13 @@ impl Channel for WhatsAppWebChannel {
     }
 
     async fn health_check(&self) -> bool {
-        let bot_handle_guard = self.bot_handle.lock();
-        bot_handle_guard.is_some()
+        // Delegate to is_ready() so the gateway, keepalive, and
+        // cron pre-flight all read the SAME field `send()` checks.
+        // Previously this inspected `bot_handle.is_some()`, which
+        // flipped true the moment the bot task was spawned -- well
+        // before the WS handshake completed -- so cron-delivery
+        // saw "client not connected" while the gateway said "ok".
+        self.is_ready().await
     }
 
     async fn start_typing(&self, recipient: &str) -> Result<()> {
@@ -1722,6 +1745,46 @@ mod tests {
     fn whatsapp_web_channel_name() {
         let ch = make_channel();
         assert_eq!(ch.name(), "whatsapp");
+    }
+
+    // ── Readiness signal (piece B of the cron-fix brief) ──────
+    //
+    // Before piece B, `health_check` returned true the moment
+    // `bot_handle.is_some()`, which flipped during bot-task spawn
+    // -- well before the WS handshake completed. Cron, gateway,
+    // and keepalive read three different signals; the cron path
+    // hit "client not connected" while the gateway said "ok".
+    // These tests pin the new contract: `is_ready()` matches what
+    // `send` actually checks (the `client` field), and
+    // `health_check()` matches `is_ready()`.
+
+    #[tokio::test]
+    #[cfg(feature = "whatsapp-web")]
+    async fn is_ready_is_false_before_client_connects() {
+        let ch = make_channel();
+        // Freshly constructed channel: no WS connect has run, so
+        // the client field is None. `send` would bail in this
+        // state with "client not connected" -- `is_ready` must
+        // agree.
+        assert!(
+            !ch.is_ready().await,
+            "freshly constructed channel must report not-ready"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "whatsapp-web")]
+    async fn health_check_matches_is_ready() {
+        let ch = make_channel();
+        // `health_check` is the gateway-facing readout. If it
+        // ever drifts from `is_ready` (the field `send` checks),
+        // we get back the original three-way readiness mismatch
+        // that broke cron delivery.
+        assert_eq!(
+            ch.health_check().await,
+            ch.is_ready().await,
+            "health_check must delegate to is_ready"
+        );
     }
 
     #[test]
