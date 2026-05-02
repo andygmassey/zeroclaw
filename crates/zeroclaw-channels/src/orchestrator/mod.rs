@@ -5744,6 +5744,31 @@ fn get_channel_for_delivery(name: &str) -> Option<Arc<dyn Channel>> {
         .and_then(|map| map.get(name).cloned())
 }
 
+/// Channel-readiness probe surfaced for the cron scheduler's
+/// pre-flight gate (piece C). Returns:
+/// - `true` when the named channel is registered AND its own
+///   `health_check` reports ready
+/// - `false` when the channel is registered but reports not-ready
+/// - `false` when no channel of that name is registered yet
+///   (start_channels hasn't run, or the operator's cron config
+///   names a channel they haven't enabled)
+///
+/// The "not registered" -> false mapping is deliberately
+/// pessimistic: the cron scheduler will retry-wait up to
+/// `delivery.max_wait_secs` before giving up, which is exactly
+/// the behaviour we want during the post-restart window when
+/// channels are still booting. If the channel never registers
+/// (config mismatch) the wait times out and the scheduler
+/// surfaces a typed `DeliveryError::ChannelNotReady` -- visible,
+/// not silently dropped.
+pub async fn channel_is_ready(name: &str) -> bool {
+    let normalized = name.to_ascii_lowercase();
+    match get_channel_for_delivery(&normalized) {
+        Some(ch) => ch.health_check().await,
+        None => false,
+    }
+}
+
 #[cfg(test)]
 fn clear_cron_delivery_registry_for_test() {
     if let Ok(mut map) = cron_delivery_registry().lock() {

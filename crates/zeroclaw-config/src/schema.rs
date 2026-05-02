@@ -6248,6 +6248,19 @@ pub struct DeliveryConfigDecl {
     /// Best-effort delivery. Default: `true`.
     #[serde(default = "default_true")]
     pub best_effort: bool,
+    /// Maximum seconds to wait for the channel to report
+    /// `health_check() == true` before giving up on a delivery.
+    /// Eliminates the post-restart race where a 09:00 cron tick
+    /// fires before the WhatsApp Web client has finished
+    /// connecting. 0 disables the gate. Default: 120.
+    /// See piece C of
+    /// /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md.
+    #[serde(default = "default_max_wait_secs_decl")]
+    pub max_wait_secs: u64,
+}
+
+pub fn default_max_wait_secs_decl() -> u64 {
+    120
 }
 
 fn default_job_type_decl() -> String {

@@ -110,6 +110,18 @@ pub struct DeliveryConfig {
     pub to: Option<String>,
     #[serde(default = "default_true")]
     pub best_effort: bool,
+    /// Maximum seconds the cron scheduler waits for the target
+    /// channel to report `health_check() == true` before giving
+    /// up on a delivery. Eliminates the 9-minute restart-to-09:00
+    /// race for WhatsApp Web (and any other channel whose
+    /// underlying client takes a beat to connect after process
+    /// start). 0 disables the gate entirely; old configs without
+    /// the field deserialize to the default 120s.
+    ///
+    /// See /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md
+    /// (RC-4, fix piece C).
+    #[serde(default = "default_max_wait_secs")]
+    pub max_wait_secs: u64,
 }
 
 impl Default for DeliveryConfig {
@@ -119,12 +131,17 @@ impl Default for DeliveryConfig {
             channel: None,
             to: None,
             best_effort: true,
+            max_wait_secs: default_max_wait_secs(),
         }
     }
 }
 
 pub fn default_true() -> bool {
     true
+}
+
+pub fn default_max_wait_secs() -> u64 {
+    120
 }
 
 fn default_source() -> String {

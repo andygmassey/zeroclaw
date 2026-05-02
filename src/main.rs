@@ -1457,6 +1457,24 @@ async fn main() -> Result<()> {
                 },
             ));
 
+            // Wire the cron pre-flight readiness probe (piece C of
+            // /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md).
+            // The scheduler polls this before invoking delivery and
+            // bounded-retries up to `delivery.max_wait_secs` if the
+            // channel reports not-ready. Eliminates the post-restart
+            // window where a 09:00 cron tick fired before the
+            // WhatsApp Web client finished its WS handshake and
+            // silently dropped the morning brief.
+            #[cfg(feature = "agent-runtime")]
+            zeroclaw_runtime::cron::scheduler::register_readiness_fn(Box::new(
+                |channel| {
+                    Box::pin(async move {
+                        zeroclaw_channels::orchestrator::channel_is_ready(&channel)
+                            .await
+                    })
+                },
+            ));
+
             let subsystems = daemon::DaemonSubsystems {
                 #[cfg(feature = "gateway")]
                 gateway_start: Some(Box::new(|host, port, config, tx| {

@@ -483,7 +483,147 @@ async fn deliver_if_configured(config: &Config, job: &CronJob, output: &str) -> 
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("delivery.to is required for announce mode"))?;
 
+    // Pre-flight readiness gate. For stateful channels (WhatsApp
+    // Web, Matrix, Mattermost) the underlying client takes a few
+    // seconds to a couple of minutes to connect after daemon
+    // start; without this gate, a 09:00 cron tick that fires
+    // mid-connect produces "client not connected" and (with
+    // best_effort=true today) silently drops the brief.
+    //
+    // The gate is a no-op for stateless channels because the
+    // default Channel::health_check trait impl returns true.
+    //
+    // max_wait_secs == 0 disables the gate entirely (escape
+    // hatch for operators who would rather fail fast than wait).
+    if delivery.max_wait_secs > 0 {
+        wait_for_channel_ready(
+            channel,
+            delivery.max_wait_secs,
+            Duration::from_secs(1),
+        )
+        .await
+        .map_err(|e| anyhow!("{e}"))?;
+    }
+
     deliver_announcement(config, channel, target, output).await
+}
+
+/// Typed error surface for delivery failures. Currently a single
+/// variant -- `ChannelNotReady` -- but introduced as an enum so
+/// piece D's posture-marker layer can pattern-match on the exact
+/// failure class (e.g. "channel never connected" vs "channel
+/// connected but send rejected") without grepping anyhow strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeliveryError {
+    /// The pre-flight readiness gate timed out: channel never
+    /// reported `health_check() == true` within `waited_secs`.
+    /// Carries enough context for the posture marker (piece D)
+    /// to surface "WhatsApp not ready, briefs won't deliver"
+    /// to the customer.
+    ChannelNotReady { channel: String, waited_secs: u64 },
+}
+
+impl std::fmt::Display for DeliveryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeliveryError::ChannelNotReady {
+                channel,
+                waited_secs,
+            } => write!(
+                f,
+                "channel '{channel}' did not report ready within {waited_secs}s; \
+                 briefs configured against this channel will not deliver until \
+                 the channel reconnects"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for DeliveryError {}
+
+/// Optional readiness probe registered alongside `DeliveryFn`.
+/// The binary crate wires this to the channel orchestrator's
+/// `channel_is_ready`, which consults the per-channel
+/// `health_check`. When no fn is registered (e.g. in a test
+/// harness or a daemon built without channels) the gate
+/// short-circuits to "ready" -- callers that care about the
+/// distinction can check via `is_readiness_fn_registered`.
+pub type ReadinessFn = Box<
+    dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>>
+        + Send
+        + Sync,
+>;
+
+static READINESS_FN: std::sync::OnceLock<ReadinessFn> = std::sync::OnceLock::new();
+
+/// Register the channel-readiness probe. Called once at startup
+/// by the binary alongside `register_delivery_fn`.
+pub fn register_readiness_fn(f: ReadinessFn) {
+    let _ = READINESS_FN.set(f);
+}
+
+/// Whether a readiness fn is registered. Tests use this to
+/// distinguish "gate active" from "no probe configured".
+pub fn is_readiness_fn_registered() -> bool {
+    READINESS_FN.get().is_some()
+}
+
+/// Public for the binary's wiring + tests; queries the
+/// registered readiness probe. Returns `true` when no probe is
+/// registered so a daemon built without channels still delivers
+/// (rather than spinning the gate forever waiting for a probe
+/// that will never fire).
+pub async fn check_channel_readiness(channel: &str) -> bool {
+    if let Some(f) = READINESS_FN.get() {
+        f(channel.to_string()).await
+    } else {
+        true
+    }
+}
+
+/// Generic polling loop. Public callers go through
+/// `wait_for_channel_ready` which probes the global readiness fn;
+/// tests pass their own closure to `wait_until_ready_with` to
+/// exercise the timeout / becomes-ready paths without wrestling
+/// with the OnceLock.
+async fn wait_until_ready_with<F, Fut>(
+    channel: &str,
+    max_wait_secs: u64,
+    tick: Duration,
+    is_ready: F,
+) -> std::result::Result<(), DeliveryError>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(max_wait_secs);
+    loop {
+        if is_ready(channel.to_string()).await {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(DeliveryError::ChannelNotReady {
+                channel: channel.to_string(),
+                waited_secs: max_wait_secs,
+            });
+        }
+        tokio::time::sleep(tick).await;
+    }
+}
+
+/// Poll the registered channel-readiness probe with `tick`
+/// cadence until it reports ready or `max_wait_secs` elapses.
+/// Returns `DeliveryError::ChannelNotReady` on timeout.
+pub(crate) async fn wait_for_channel_ready(
+    channel: &str,
+    max_wait_secs: u64,
+    tick: Duration,
+) -> std::result::Result<(), DeliveryError> {
+    wait_until_ready_with(channel, max_wait_secs, tick, |c| async move {
+        check_channel_readiness(&c).await
+    })
+    .await
 }
 
 /// Delivery function type — takes owned values so the returned future is 'static.
@@ -1177,6 +1317,10 @@ mod tests {
                 channel: Some("telegram".into()),
                 to: Some("123456".into()),
                 best_effort: false,
+                // 0 disables the readiness gate so this test
+                // exercises the legacy delivery path without
+                // waiting for a probe that nothing here registers.
+                max_wait_secs: 0,
             }),
             false,
             None,
@@ -1216,6 +1360,7 @@ mod tests {
                 channel: Some("telegram".into()),
                 to: Some("123456".into()),
                 best_effort: true,
+                max_wait_secs: 0,
             }),
             false,
             None,
@@ -1290,6 +1435,7 @@ mod tests {
             channel: Some("telegram".into()),
             to: Some("123456".into()),
             best_effort: true,
+            max_wait_secs: 0,
         };
 
         // `best_effort` controls whether cron_run surfaces this as a failed
@@ -1454,5 +1600,125 @@ mod tests {
 
         process_due_jobs(&config, &security, vec![job], &component, &event_tx).await;
         // If we got here without panic, the test passes.
+    }
+
+    // ── Pre-flight readiness gate (piece C) ─────────────────
+    //
+    // The gate is exercised through `wait_until_ready_with`,
+    // which is the test-friendly variant of
+    // `wait_for_channel_ready` -- it takes the readiness probe
+    // as a closure rather than going through the global
+    // `READINESS_FN` OnceLock. Tests assert the three reachable
+    // outcomes: ready immediately, becomes ready during the
+    // wait window, never becomes ready (typed
+    // `DeliveryError::ChannelNotReady`).
+
+    #[tokio::test]
+    async fn pre_flight_returns_immediately_when_channel_ready() {
+        // Real-time runtime with a 10ms tick keeps tests fast
+        // without needing tokio/test-util's paused-time.
+        let result = wait_until_ready_with(
+            "stub-channel",
+            120,
+            Duration::from_millis(10),
+            |_| async move { true },
+        )
+        .await;
+
+        assert!(result.is_ok(), "ready probe should yield Ok immediately");
+    }
+
+    #[tokio::test]
+    async fn pre_flight_succeeds_when_channel_becomes_ready_mid_wait() {
+        // Probe returns false 3 times, then true. Exercises the
+        // bounded retry path -- the workhorse of piece C.
+        let attempts = std::sync::Arc::new(
+            std::sync::atomic::AtomicUsize::new(0),
+        );
+        let attempts_clone = attempts.clone();
+        let result = wait_until_ready_with(
+            "stub-channel",
+            120,
+            Duration::from_millis(10),
+            move |_| {
+                let attempts = attempts_clone.clone();
+                async move {
+                    let n = attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    n >= 3
+                }
+            },
+        )
+        .await;
+
+        assert!(result.is_ok(), "becomes-ready probe should yield Ok");
+        // 3 not-ready probes (n=0,1,2) + 1 ready probe (n=3) = 4
+        // total invocations.
+        assert_eq!(
+            attempts.load(std::sync::atomic::Ordering::SeqCst),
+            4,
+            "should have polled 4 times (3 not-ready + 1 ready)"
+        );
+    }
+
+    #[tokio::test]
+    async fn pre_flight_returns_typed_error_after_timeout() {
+        let result = wait_until_ready_with(
+            "stuck-channel",
+            2,
+            Duration::from_millis(10),
+            |_| async move { false },
+        )
+        .await;
+
+        match result {
+            Err(DeliveryError::ChannelNotReady {
+                channel,
+                waited_secs,
+            }) => {
+                assert_eq!(channel, "stuck-channel");
+                assert_eq!(waited_secs, 2);
+            }
+            other => panic!(
+                "expected DeliveryError::ChannelNotReady; got {other:?}"
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn check_channel_readiness_is_optimistic_when_no_fn_registered() {
+        // In a daemon built without the channels feature (or in
+        // a test harness) no readiness fn is registered. The
+        // gate should NOT spin forever -- it should treat
+        // "no probe" as "assume ready" so delivery proceeds.
+        // Note: this test relies on the fact that a daemon
+        // running this test binary never registers a readiness
+        // fn, so the OnceLock stays empty.
+        if !is_readiness_fn_registered() {
+            assert!(
+                check_channel_readiness("anything").await,
+                "no-fn case must return true"
+            );
+        }
+    }
+
+    #[test]
+    fn delivery_error_display_includes_channel_and_wait() {
+        let err = DeliveryError::ChannelNotReady {
+            channel: "whatsapp".into(),
+            waited_secs: 120,
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("whatsapp"));
+        assert!(msg.contains("120"));
+        // Customer-facing wording: must read like a posture
+        // marker would, since piece D will surface it via
+        // zeroclaw doctor.
+        assert!(msg.contains("did not report ready"));
+    }
+
+    #[test]
+    fn default_delivery_config_has_120s_wait() {
+        let d = DeliveryConfig::default();
+        assert_eq!(d.max_wait_secs, 120);
     }
 }
