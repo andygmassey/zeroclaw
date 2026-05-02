@@ -1,0 +1,36 @@
+[DRAFT – pending legal review]
+
+One last thing – what Ostler will look at on your Mac
+
+Ostler is a personal assistant, so it works by looking at the parts of your life you keep on this Mac. Some of that is sensitive. UK and EU privacy law requires us to ask you, in clear words, before we touch any of it.
+
+Where the data lives. Everything Ostler reads stays on this Mac, in encrypted folders only you can unlock. We never get a copy. There is no "cloud" version of your data.
+
+What's in scope. Depending on which connectors you turn on, Ostler may process the following kinds of information that the law treats as "special category" data:
+
+- Health information that you mention in emails, messages, calendar entries or recorded conversations
+- Religious or philosophical beliefs mentioned in any of the above
+- Sexual orientation mentioned in any of the above
+- Trade union membership
+- Voice recordings, used only to label *who* is speaking on calls (speaker identification). We do not infer mood, emotion, sentiment, stress or deception from voice.
+- Mentions of criminal offences – your own or other people's – in any of the above
+
+We do not perform emotion recognition. If that ever changes we will ask you again, separately, on a new consent screen.
+
+All of this stays on your Mac. None of it is sent to Creative Machines or to any third party, except in the specific cases listed in our Privacy Policy at ostler.ai/privacy (mainly: optional cloud routing for non-personal questions, software update checks, and a handful of public metadata services). If you want to read those exceptions before consenting, click "Read the Privacy Policy" below.
+
+You can change your mind any time. You can:
+
+- turn individual connectors (email, calendar, WhatsApp, etc.) off in Settings, which stops Ostler reading that source
+- delete everything Ostler has stored using "Reset Ostler" in the menu
+- completely uninstall Ostler using the uninstaller at ~/Documents/Ostler/Uninstall Ostler.app
+
+Withdrawing consent stops processing from that point forward. It does not undo work Ostler already did with your earlier consent.
+
+Your decision:
+
+[ ] I consent to Ostler processing the categories of personal data above, locally on this Mac, for the purpose of running my personal assistant.
+    (continues the install)
+
+[ ] I do not consent.
+    (cancels and removes the installer; nothing is stored on this Mac)

@@ -1,0 +1,29 @@
+[DRAFT – pending legal review]
+
+WhatsApp connector – please read carefully
+
+Ostler can read your WhatsApp messages locally on this Mac so you can search and reference them like any other part of your life. The messages stay on your Mac. Nothing is sent to us.
+
+There is a risk you should understand before turning this on.
+
+WhatsApp's own Terms of Service say their service can only be accessed using "official" WhatsApp software. Strictly speaking, the way Ostler reads your messages – by reading WhatsApp Web's storage on your Mac – is not what WhatsApp considers "official."
+
+In practice, this kind of read access is widely used and we are not aware of any documented case of WhatsApp banning a user for it. But we cannot rule out the possibility that WhatsApp could:
+
+- suspend your WhatsApp account, temporarily or permanently
+- block the device from connecting
+- require you to re-verify your number
+
+If that happens, it happens to your WhatsApp account, not to Creative Machines. You – not us – are the person bound by WhatsApp's Terms of Service. We cannot get your account back for you, and we are not liable for any loss you suffer if WhatsApp takes action against your account.
+
+By continuing, you confirm that:
+
+1. You understand this risk.
+2. You accept it on your own behalf.
+3. You agree that Creative Machines is not responsible if WhatsApp suspends, restricts or terminates your WhatsApp account because of your use of the connector.
+4. You have the right to disable the connector at any time from Ostler's settings, and you understand that disabling it does not undo any action WhatsApp may have already taken.
+
+If you don't want to accept this risk, just leave this turned off – Ostler still works without the WhatsApp connector. You can turn it on later from Settings.
+
+[ ] I understand the risk and I want to enable the WhatsApp connector.
+[ ] No thanks, leave WhatsApp disabled. (default selection)

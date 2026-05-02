@@ -1,0 +1,13 @@
+[DRAFT – pending legal review]
+
+Recognising voices on calls
+
+Ostler can label transcripts with who is speaking – for example, "Andy", "Alison" – by storing a numeric fingerprint of each voice locally on this Mac. Under UK and EU privacy law this is biometric data, so we have to ask first.
+
+What we do. Identify *who* is speaking on a recording you make.
+What we do not do. Detect mood, emotion, sentiment, stress or any other inferred psychological state from voice.
+
+The fingerprints stay on this Mac. We never receive them. You can turn this off any time in Settings → Privacy → Voice recognition; turning it off deletes any fingerprints already stored.
+
+[ ] Yes, recognise voices and label my transcripts.
+[ ] No thanks, leave voices unlabelled.
