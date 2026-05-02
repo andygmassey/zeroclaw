@@ -15,6 +15,7 @@ pub mod doctor;
 pub mod health;
 pub mod heartbeat;
 pub mod hooks;
+pub mod imessage_tcc;
 pub mod integrations;
 pub mod nodes;
 pub mod observability;

@@ -83,6 +83,7 @@ pub fn diagnose(config: &Config) -> Vec<DiagResult> {
     check_config_semantics(config, &mut items);
     check_workspace(config, &mut items);
     check_daemon_state(config, &mut items);
+    check_imessage_tcc_inprocess(config, &mut items);
     check_environment(&mut items);
     check_cli_tools(&mut items);
 
@@ -903,6 +904,154 @@ fn check_daemon_state(config: &Config, items: &mut Vec<DiagItem>) {
                 format!("{channel_count} channels, {stale} stale"),
             ));
         }
+
+        // cron-delivery: surfaces piece C/D's posture marker
+        // (`mark_component_error("cron-delivery", ...)` on
+        // `DeliveryError::ChannelNotReady` and on the startup
+        // readiness sweep). Promote to top-level severity instead
+        // of leaving it buried in the generic component table so
+        // the operator sees "your morning brief won't deliver"
+        // before they hit the silent-drop.
+        check_cron_delivery_component(components, items);
+
+        // imessage-tcc: piece D / task #278. The daemon probes
+        // AppleEvents permission for Messages.app at startup;
+        // surface the result here alongside the daemon-side mark.
+        // We also do an in-process probe (below in `diagnose()`)
+        // so `zeroclaw doctor` works even when the daemon is not
+        // currently running.
+        check_imessage_tcc_component(components, items);
+    }
+}
+
+fn check_cron_delivery_component(
+    components: &serde_json::Map<String, serde_json::Value>,
+    items: &mut Vec<DiagItem>,
+) {
+    let cat = "cron-delivery";
+    let Some(component) = components.get("cron-delivery") else {
+        items.push(DiagItem::warn(
+            cat,
+            "cron-delivery component not tracked yet (daemon may still \
+             be in startup grace, or no declarative jobs have delivery \
+             configured)",
+        ));
+        return;
+    };
+    let status = component
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    match status {
+        "ok" => items.push(DiagItem::ok(
+            cat,
+            "all declarative cron-delivery channels reported ready",
+        )),
+        "starting" => items.push(DiagItem::warn(
+            cat,
+            "cron-delivery still in startup grace -- channels not yet probed",
+        )),
+        "error" => {
+            let reason = component
+                .get("last_error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("(no error message recorded)");
+            items.push(DiagItem::error(
+                cat,
+                format!(
+                    "cron-delivery unhealthy: {reason}. Scheduled \
+                     announcements will not deliver to affected \
+                     channels until the channel reconnects."
+                ),
+            ));
+        }
+        other => items.push(DiagItem::warn(
+            cat,
+            format!("cron-delivery status='{other}' (unrecognised)"),
+        )),
+    }
+}
+
+fn check_imessage_tcc_component(
+    components: &serde_json::Map<String, serde_json::Value>,
+    items: &mut Vec<DiagItem>,
+) {
+    let cat = "imessage-tcc";
+    let Some(component) = components.get("imessage-tcc") else {
+        // Daemon hasn't probed yet (or iMessage isn't enabled).
+        // The in-process probe in `diagnose()` covers the
+        // doctor-without-daemon case; nothing to surface here.
+        return;
+    };
+    let status = component
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    match status {
+        "ok" => items.push(DiagItem::ok(
+            cat,
+            "Automation permission for Messages.app is granted (daemon probe)",
+        )),
+        "error" => {
+            let reason = component
+                .get("last_error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("(no error message recorded)");
+            items.push(DiagItem::error(cat, reason.to_string()));
+        }
+        "starting" => items.push(DiagItem::warn(
+            cat,
+            "imessage-tcc probe pending",
+        )),
+        other => items.push(DiagItem::warn(
+            cat,
+            format!("imessage-tcc status='{other}' (unrecognised)"),
+        )),
+    }
+}
+
+// ── iMessage TCC (in-process probe for `zeroclaw doctor`) ─────────
+
+fn check_imessage_tcc_inprocess(config: &Config, items: &mut Vec<DiagItem>) {
+    let cat = "imessage-tcc";
+    let imessage_enabled = config
+        .channels
+        .imessage
+        .as_ref()
+        .is_some_and(|c| c.enabled);
+    if !imessage_enabled {
+        return;
+    }
+
+    let outcome = crate::imessage_tcc::probe();
+    match outcome {
+        crate::imessage_tcc::ImessageTccStatus::Authorized => {
+            items.push(DiagItem::ok(
+                cat,
+                "Automation permission for Messages.app is granted",
+            ));
+        }
+        crate::imessage_tcc::ImessageTccStatus::Denied(reason) => {
+            items.push(DiagItem::error(
+                cat,
+                format!(
+                    "Automation permission for Messages.app is denied -- \
+                     iMessage delivery will fail. Open System Settings \
+                     → Privacy & Security → Automation and enable \
+                     Messages for the ZeroClaw assistant. Raw: {reason}"
+                ),
+            ));
+        }
+        crate::imessage_tcc::ImessageTccStatus::Unknown(reason) => {
+            items.push(DiagItem::warn(
+                cat,
+                format!("imessage-tcc probe inconclusive: {reason}"),
+            ));
+        }
+        crate::imessage_tcc::ImessageTccStatus::NotMacOs => {
+            // iMessage on non-macOS is a config error we already warn
+            // about elsewhere; no need to repeat here.
+        }
     }
 }
 
@@ -1338,5 +1487,86 @@ mod tests {
         assert_eq!(agent_messages.len(), 2);
         assert!(agent_messages[0].contains("agent \"alpha\""));
         assert!(agent_messages[1].contains("agent \"zeta\""));
+    }
+
+    // ── Piece D: cron-delivery + imessage-tcc Doctor surface ───
+
+    fn components_from(json: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        json.as_object().cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn check_cron_delivery_component_emits_error_when_unhealthy() {
+        let components = components_from(serde_json::json!({
+            "cron-delivery": {
+                "status": "error",
+                "last_error": "channel 'whatsapp' did not report ready within 120s",
+                "updated_at": "2026-05-02T12:34:56Z",
+                "restart_count": 0
+            }
+        }));
+        let mut items = Vec::new();
+        check_cron_delivery_component(&components, &mut items);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].severity, Severity::Error);
+        assert!(items[0].message.contains("whatsapp"));
+        assert!(items[0].message.contains("not deliver"));
+    }
+
+    #[test]
+    fn check_cron_delivery_component_emits_ok_when_healthy() {
+        let components = components_from(serde_json::json!({
+            "cron-delivery": {
+                "status": "ok",
+                "updated_at": "2026-05-02T12:34:56Z",
+                "last_ok": "2026-05-02T12:34:56Z",
+                "restart_count": 0
+            }
+        }));
+        let mut items = Vec::new();
+        check_cron_delivery_component(&components, &mut items);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].severity, Severity::Ok);
+    }
+
+    #[test]
+    fn check_cron_delivery_component_warns_when_missing() {
+        let components = components_from(serde_json::json!({}));
+        let mut items = Vec::new();
+        check_cron_delivery_component(&components, &mut items);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].severity, Severity::Warn);
+        assert!(items[0].message.contains("not tracked yet"));
+    }
+
+    #[test]
+    fn check_imessage_tcc_component_surfaces_error_with_actionable_text() {
+        let components = components_from(serde_json::json!({
+            "imessage-tcc": {
+                "status": "error",
+                "last_error": "Automation permission for Messages.app is denied -- \
+                                open System Settings → Privacy & Security → Automation \
+                                and enable Messages for the ZeroClaw assistant.",
+                "updated_at": "2026-05-02T12:34:56Z",
+                "restart_count": 0
+            }
+        }));
+        let mut items = Vec::new();
+        check_imessage_tcc_component(&components, &mut items);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].severity, Severity::Error);
+        assert!(items[0].message.contains("Messages.app"));
+        assert!(items[0].message.contains("System Settings"));
+    }
+
+    #[test]
+    fn check_imessage_tcc_component_silent_when_not_tracked() {
+        // No component yet (daemon hasn't probed, or iMessage off).
+        // Doctor should not produce noise; the in-process probe in
+        // `diagnose()` covers the doctor-without-daemon case.
+        let components = components_from(serde_json::json!({}));
+        let mut items = Vec::new();
+        check_imessage_tcc_component(&components, &mut items);
+        assert!(items.is_empty());
     }
 }

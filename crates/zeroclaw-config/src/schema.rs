@@ -6257,10 +6257,24 @@ pub struct DeliveryConfigDecl {
     /// /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md.
     #[serde(default = "default_max_wait_secs_decl")]
     pub max_wait_secs: u64,
+    /// Seconds the daemon waits after startup before flagging this
+    /// job's target channel as unhealthy in the `cron-delivery`
+    /// component. Default: 60. Pre-flight retry (max_wait_secs)
+    /// handles per-tick races; this gates the startup readiness
+    /// sweep so a daemon restart does not immediately mark
+    /// cron-delivery as error before channels have had a chance to
+    /// boot. See piece D of
+    /// /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md.
+    #[serde(default = "default_startup_grace_secs_decl")]
+    pub startup_grace_secs: u64,
 }
 
 pub fn default_max_wait_secs_decl() -> u64 {
     120
+}
+
+pub fn default_startup_grace_secs_decl() -> u64 {
+    60
 }
 
 fn default_job_type_decl() -> String {

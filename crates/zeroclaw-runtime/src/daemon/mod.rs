@@ -219,9 +219,83 @@ pub async fn run(
                 async move { Box::pin(crate::cron::scheduler::run(cfg, Some(tx))).await }
             },
         ));
+
+        // One-shot startup readiness sweep for the `cron-delivery`
+        // health component. Walks declarative cron jobs after
+        // `delivery.startup_grace_secs` (default 60), probes each
+        // target channel, and marks `cron-delivery` ok or error.
+        // Catches "channels never came up at all" -- the gap that
+        // the per-tick pre-flight gate (piece C) cannot detect.
+        // Piece D of
+        // /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md.
+        let sweep_cfg = config.clone();
+        handles.push(tokio::spawn(async move {
+            crate::cron::scheduler::run_startup_readiness_sweep(sweep_cfg)
+                .await;
+        }));
     } else {
         crate::health::mark_component_ok("scheduler");
+        crate::health::mark_component_ok("cron-delivery");
         tracing::info!("Cron disabled; scheduler supervisor not started");
+    }
+
+    // One-shot iMessage TCC probe. Marks the `imessage-tcc` health
+    // component so the wiki posture surface and doctor can flag a
+    // TCC denial before the operator notices iMessage delivery has
+    // been silently failing. Skipped when iMessage is not enabled
+    // in config; on non-macOS the probe is a no-op that marks ok.
+    // Piece D / task #278.
+    let imessage_enabled = config
+        .channels
+        .imessage
+        .as_ref()
+        .is_some_and(|c| c.enabled);
+    if imessage_enabled {
+        handles.push(tokio::spawn(async move {
+            // `osascript` is blocking; run on the blocking pool.
+            let outcome = match tokio::task::spawn_blocking(
+                crate::imessage_tcc::probe,
+            )
+            .await
+            {
+                Ok(status) => status,
+                Err(err) => {
+                    tracing::warn!(
+                        "imessage-tcc probe task panicked: {err}"
+                    );
+                    return;
+                }
+            };
+            match outcome {
+                crate::imessage_tcc::ImessageTccStatus::Authorized => {
+                    crate::health::mark_component_ok("imessage-tcc");
+                }
+                crate::imessage_tcc::ImessageTccStatus::Denied(reason) => {
+                    crate::health::mark_component_error(
+                        "imessage-tcc",
+                        format!(
+                            "Automation permission for Messages.app is \
+                             denied -- iMessage delivery will fail. \
+                             Open System Settings → Privacy & Security \
+                             → Automation and enable Messages for the \
+                             ZeroClaw assistant. Raw: {reason}"
+                        ),
+                    );
+                }
+                crate::imessage_tcc::ImessageTccStatus::Unknown(reason) => {
+                    tracing::warn!(
+                        "imessage-tcc probe returned unknown status: {reason}"
+                    );
+                    // Don't mark error -- the probe itself is uncertain;
+                    // doctor will surface as a warn.
+                }
+                crate::imessage_tcc::ImessageTccStatus::NotMacOs => {
+                    crate::health::mark_component_ok("imessage-tcc");
+                }
+            }
+        }));
+    } else {
+        crate::health::mark_component_ok("imessage-tcc");
     }
 
     // PWG wing-resolution bridge: poll the gateway-emitted queue and DM

@@ -850,6 +850,7 @@ fn convert_delivery_decl(decl: &zeroclaw_config::schema::DeliveryConfigDecl) -> 
         to: decl.to.clone(),
         best_effort: decl.best_effort,
         max_wait_secs: decl.max_wait_secs,
+        startup_grace_secs: decl.startup_grace_secs,
     }
 }
 
@@ -1024,6 +1025,7 @@ mod tests {
                 to: Some("1234567890".into()),
                 best_effort: true,
                 max_wait_secs: 0,
+                startup_grace_secs: 0,
             }),
         )
         .unwrap();
@@ -1059,6 +1061,7 @@ mod tests {
                 to: None,
                 best_effort: true,
                 max_wait_secs: 0,
+                startup_grace_secs: 0,
             }),
             false,
             None,
@@ -1087,6 +1090,7 @@ mod tests {
                 to: Some("1234567890".into()),
                 best_effort: true,
                 max_wait_secs: 0,
+                startup_grace_secs: 0,
             }),
         )
         .unwrap_err();

@@ -122,6 +122,18 @@ pub struct DeliveryConfig {
     /// (RC-4, fix piece C).
     #[serde(default = "default_max_wait_secs")]
     pub max_wait_secs: u64,
+    /// Seconds the daemon waits after startup before flagging this
+    /// job's target channel as unhealthy in the `cron-delivery`
+    /// component. The pre-flight retry (`max_wait_secs`) handles
+    /// per-tick races; this gates the startup readiness sweep so a
+    /// daemon restart does not immediately mark cron-delivery as
+    /// error before channels have had a chance to boot. Default:
+    /// 60s.
+    ///
+    /// See /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md
+    /// (piece D).
+    #[serde(default = "default_startup_grace_secs")]
+    pub startup_grace_secs: u64,
 }
 
 impl Default for DeliveryConfig {
@@ -132,6 +144,7 @@ impl Default for DeliveryConfig {
             to: None,
             best_effort: true,
             max_wait_secs: default_max_wait_secs(),
+            startup_grace_secs: default_startup_grace_secs(),
         }
     }
 }
@@ -142,6 +155,10 @@ pub fn default_true() -> bool {
 
 pub fn default_max_wait_secs() -> u64 {
     120
+}
+
+pub fn default_startup_grace_secs() -> u64 {
+    60
 }
 
 fn default_source() -> String {

@@ -496,16 +496,40 @@ async fn deliver_if_configured(config: &Config, job: &CronJob, output: &str) -> 
     // max_wait_secs == 0 disables the gate entirely (escape
     // hatch for operators who would rather fail fast than wait).
     if delivery.max_wait_secs > 0 {
-        wait_for_channel_ready(
+        match wait_for_channel_ready(
             channel,
             delivery.max_wait_secs,
             Duration::from_secs(1),
         )
         .await
-        .map_err(|e| anyhow!("{e}"))?;
+        {
+            Ok(()) => {}
+            Err(err) => {
+                // Typed `DeliveryError::ChannelNotReady` -- record on
+                // the `cron-delivery` health component so `zeroclaw
+                // doctor` and the wiki posture surface can flag the
+                // operator before they notice their morning brief is
+                // missing. Piece D of
+                // /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md.
+                crate::health::mark_component_error(
+                    "cron-delivery",
+                    err.to_string(),
+                );
+                return Err(anyhow!("{err}"));
+            }
+        }
     }
 
-    deliver_announcement(config, channel, target, output).await
+    let result = deliver_announcement(config, channel, target, output).await;
+    if result.is_ok() {
+        crate::health::mark_component_ok("cron-delivery");
+    } else if let Err(ref err) = result {
+        crate::health::mark_component_error(
+            "cron-delivery",
+            format!("delivery to '{channel}' failed: {err}"),
+        );
+    }
+    result
 }
 
 /// Typed error surface for delivery failures. Currently a single
@@ -624,6 +648,160 @@ pub(crate) async fn wait_for_channel_ready(
         check_channel_readiness(&c).await
     })
     .await
+}
+
+/// One-shot startup readiness sweep for the `cron-delivery`
+/// component. After waiting `max(startup_grace_secs)` across all
+/// enabled cron jobs with `mode = "announce"` and a configured
+/// channel, probe each unique target channel via the registered
+/// readiness fn and update the `cron-delivery` health component.
+///
+/// The per-tick pre-flight gate (piece C) handles transient
+/// un-readiness on cron firing; this sweep specifically catches
+/// "channels never came up at all" -- the failure mode where
+/// `health_check()` keeps returning false because the underlying
+/// client (e.g. WhatsApp Web) failed to connect, so cron ticks
+/// time out indefinitely.
+///
+/// Spawned as a one-shot tokio task from the daemon `run` so it
+/// does not block scheduler startup or hold up channel boot.
+///
+/// See piece D of
+/// /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md.
+pub async fn run_startup_readiness_sweep(config: Config) {
+    const COMPONENT: &str = "cron-delivery";
+
+    let jobs = match crate::cron::list_jobs(&config) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::warn!(
+                "cron-delivery startup sweep: cannot enumerate jobs: {e}"
+            );
+            return;
+        }
+    };
+
+    let plan = build_sweep_plan(&jobs);
+    if plan.is_empty() {
+        // Nothing declarative to sweep -- mark ok so doctor doesn't
+        // report "starting" forever for daemons without cron-delivery.
+        crate::health::mark_component_ok(COMPONENT);
+        return;
+    }
+
+    if plan.max_grace_secs > 0 {
+        tokio::time::sleep(Duration::from_secs(plan.max_grace_secs))
+            .await;
+    }
+
+    let not_ready = probe_sweep_plan(&plan, |c| async move {
+        check_channel_readiness(&c).await
+    })
+    .await;
+
+    if not_ready.is_empty() {
+        crate::health::mark_component_ok(COMPONENT);
+    } else {
+        crate::health::mark_component_error(
+            COMPONENT,
+            format!(
+                "channels not ready after {grace}s grace: {list}",
+                grace = plan.max_grace_secs,
+                list = not_ready.join(", "),
+            ),
+        );
+    }
+}
+
+/// Per-channel sweep target. One entry per unique channel name;
+/// the originating `job_id` is captured so the error message can
+/// point the operator at the offending declarative job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SweepTarget {
+    pub channel: String,
+    pub job_id: String,
+}
+
+/// Output of `build_sweep_plan` -- the de-duplicated set of
+/// channels to probe and the longest configured startup grace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SweepPlan {
+    pub targets: Vec<SweepTarget>,
+    pub max_grace_secs: u64,
+}
+
+impl SweepPlan {
+    pub fn is_empty(&self) -> bool {
+        self.targets.is_empty()
+    }
+}
+
+/// Build the de-duplicated sweep plan from a list of cron jobs.
+/// Pulled out as a pure fn so unit tests can exercise the filter
+/// + dedup + max-grace computation without sleeping or touching
+/// the global readiness probe.
+pub(crate) fn build_sweep_plan(jobs: &[CronJob]) -> SweepPlan {
+    let mut targets: Vec<SweepTarget> = Vec::new();
+    let mut seen: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let mut max_grace: u64 = 0;
+
+    for job in jobs {
+        if !job.enabled {
+            continue;
+        }
+        if !job.delivery.mode.eq_ignore_ascii_case("announce") {
+            continue;
+        }
+        let Some(channel) = job
+            .delivery
+            .channel
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+        else {
+            continue;
+        };
+        // Track grace across all candidates -- even duplicates,
+        // since the operator may have configured per-job graces
+        // and we want the longest before giving up.
+        max_grace = max_grace.max(job.delivery.startup_grace_secs);
+        if seen.insert(channel.to_string()) {
+            targets.push(SweepTarget {
+                channel: channel.to_string(),
+                job_id: job.id.clone(),
+            });
+        }
+    }
+
+    SweepPlan {
+        targets,
+        max_grace_secs: max_grace,
+    }
+}
+
+/// Probe each target in the plan with the supplied async fn.
+/// Returns formatted "'channel' (job id)" strings for targets
+/// whose probe returned false. Pulled out so tests can pass an
+/// in-memory probe instead of the global OnceLock.
+pub(crate) async fn probe_sweep_plan<F, Fut>(
+    plan: &SweepPlan,
+    is_ready: F,
+) -> Vec<String>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let mut not_ready = Vec::new();
+    for target in &plan.targets {
+        if !is_ready(target.channel.clone()).await {
+            not_ready.push(format!(
+                "'{}' (job {})",
+                target.channel, target.job_id
+            ));
+        }
+    }
+    not_ready
 }
 
 /// Delivery function type — takes owned values so the returned future is 'static.
@@ -1321,6 +1499,7 @@ mod tests {
                 // exercises the legacy delivery path without
                 // waiting for a probe that nothing here registers.
                 max_wait_secs: 0,
+                startup_grace_secs: 0,
             }),
             false,
             None,
@@ -1361,6 +1540,7 @@ mod tests {
                 to: Some("123456".into()),
                 best_effort: true,
                 max_wait_secs: 0,
+                startup_grace_secs: 0,
             }),
             false,
             None,
@@ -1436,6 +1616,7 @@ mod tests {
             to: Some("123456".into()),
             best_effort: true,
             max_wait_secs: 0,
+            startup_grace_secs: 0,
         };
 
         // `best_effort` controls whether cron_run surfaces this as a failed
@@ -1720,5 +1901,148 @@ mod tests {
     fn default_delivery_config_has_120s_wait() {
         let d = DeliveryConfig::default();
         assert_eq!(d.max_wait_secs, 120);
+    }
+
+    #[test]
+    fn default_delivery_config_has_60s_startup_grace() {
+        let d = DeliveryConfig::default();
+        assert_eq!(d.startup_grace_secs, 60);
+    }
+
+    // ── Sweep-plan helpers (piece D) ───────────────────────────
+
+    fn announce_job(
+        id: &str,
+        channel: Option<&str>,
+        enabled: bool,
+        startup_grace_secs: u64,
+    ) -> CronJob {
+        let mut job = test_job("echo");
+        job.id = id.into();
+        job.enabled = enabled;
+        job.delivery = DeliveryConfig {
+            mode: "announce".into(),
+            channel: channel.map(Into::into),
+            to: Some("123456".into()),
+            best_effort: true,
+            max_wait_secs: 0,
+            startup_grace_secs,
+        };
+        job
+    }
+
+    #[test]
+    fn build_sweep_plan_filters_disabled_and_non_announce() {
+        let jobs = vec![
+            announce_job("a", Some("whatsapp"), true, 60),
+            announce_job("b", Some("telegram"), false, 60), // disabled
+            {
+                // mode = "none" should be filtered
+                let mut j = test_job("echo");
+                j.delivery.mode = "none".into();
+                j.delivery.channel = Some("matrix".into());
+                j
+            },
+        ];
+        let plan = build_sweep_plan(&jobs);
+        assert_eq!(plan.targets.len(), 1);
+        assert_eq!(plan.targets[0].channel, "whatsapp");
+        assert_eq!(plan.targets[0].job_id, "a");
+    }
+
+    #[test]
+    fn build_sweep_plan_dedups_by_channel() {
+        let jobs = vec![
+            announce_job("morning-brief", Some("whatsapp"), true, 60),
+            announce_job("evening-brief", Some("whatsapp"), true, 90),
+            announce_job("ops-channel", Some("telegram"), true, 30),
+        ];
+        let plan = build_sweep_plan(&jobs);
+        assert_eq!(plan.targets.len(), 2);
+        // Channel is deduplicated; first job seen wins for the
+        // captured job_id.
+        let whatsapp = plan
+            .targets
+            .iter()
+            .find(|t| t.channel == "whatsapp")
+            .unwrap();
+        assert_eq!(whatsapp.job_id, "morning-brief");
+    }
+
+    #[test]
+    fn build_sweep_plan_returns_max_grace_across_jobs() {
+        let jobs = vec![
+            announce_job("a", Some("whatsapp"), true, 30),
+            announce_job("b", Some("telegram"), true, 120),
+            announce_job("c", Some("matrix"), true, 60),
+        ];
+        let plan = build_sweep_plan(&jobs);
+        assert_eq!(plan.max_grace_secs, 120);
+    }
+
+    #[test]
+    fn build_sweep_plan_skips_blank_or_missing_channels() {
+        let jobs = vec![
+            announce_job("a", None, true, 60),
+            announce_job("b", Some(""), true, 60),
+            announce_job("c", Some("   "), true, 60),
+            announce_job("d", Some("discord"), true, 60),
+        ];
+        let plan = build_sweep_plan(&jobs);
+        assert_eq!(plan.targets.len(), 1);
+        assert_eq!(plan.targets[0].channel, "discord");
+    }
+
+    #[test]
+    fn build_sweep_plan_empty_when_no_announce_jobs() {
+        let jobs = vec![test_job("echo a"), test_job("echo b")];
+        let plan = build_sweep_plan(&jobs);
+        assert!(plan.is_empty());
+    }
+
+    #[tokio::test]
+    async fn probe_sweep_plan_collects_only_unready_channels() {
+        let plan = SweepPlan {
+            targets: vec![
+                SweepTarget {
+                    channel: "whatsapp".into(),
+                    job_id: "morning-brief".into(),
+                },
+                SweepTarget {
+                    channel: "telegram".into(),
+                    job_id: "ops".into(),
+                },
+                SweepTarget {
+                    channel: "matrix".into(),
+                    job_id: "alerts".into(),
+                },
+            ],
+            max_grace_secs: 60,
+        };
+        let not_ready = probe_sweep_plan(&plan, |c| async move {
+            // Only telegram is "ready" in this scenario.
+            c == "telegram"
+        })
+        .await;
+        assert_eq!(not_ready.len(), 2);
+        assert!(not_ready.iter().any(|s| s.contains("whatsapp")));
+        assert!(not_ready.iter().any(|s| s.contains("morning-brief")));
+        assert!(not_ready.iter().any(|s| s.contains("matrix")));
+        assert!(not_ready.iter().any(|s| s.contains("alerts")));
+        assert!(!not_ready.iter().any(|s| s.contains("telegram")));
+    }
+
+    #[tokio::test]
+    async fn probe_sweep_plan_empty_when_all_ready() {
+        let plan = SweepPlan {
+            targets: vec![SweepTarget {
+                channel: "whatsapp".into(),
+                job_id: "morning-brief".into(),
+            }],
+            max_grace_secs: 60,
+        };
+        let not_ready =
+            probe_sweep_plan(&plan, |_| async move { true }).await;
+        assert!(not_ready.is_empty());
     }
 }
