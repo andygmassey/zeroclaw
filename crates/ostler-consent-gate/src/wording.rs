@@ -28,8 +28,7 @@
 pub const ARTICLE_9_EU_CONSENT: &str = include_str!("wording_data/article_9.txt");
 
 /// WhatsApp unofficial-Web risk-allocation tickbox wording.
-pub const WHATSAPP_UNOFFICIAL_RISK_CONSENT: &str =
-    include_str!("wording_data/whatsapp.txt");
+pub const WHATSAPP_UNOFFICIAL_RISK_CONSENT: &str = include_str!("wording_data/whatsapp.txt");
 
 /// EU voice speaker-ID gate wording (NOT emotion).
 pub const EU_VOICE_SPEAKER_ID_CONSENT: &str = include_str!("wording_data/voice.txt");

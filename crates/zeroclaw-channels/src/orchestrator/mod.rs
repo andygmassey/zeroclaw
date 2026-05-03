@@ -2379,10 +2379,7 @@ fn spawn_supervised_listener_with_health_interval(
         // tied to their actual readiness, which the gateway,
         // keepalive, and cron pre-flight all read from the same
         // place.
-        async fn refresh_component_health(
-            ch: &Arc<dyn Channel>,
-            component: &str,
-        ) {
+        async fn refresh_component_health(ch: &Arc<dyn Channel>, component: &str) {
             if ch.health_check().await {
                 zeroclaw_runtime::health::mark_component_ok(component);
             } else {
@@ -5825,11 +5822,8 @@ pub async fn deliver_announcement(
     // stateless channels; will surface a clear "not connected"
     // error for stateful channels that weren't yet registered.
     let channel_inst = build_channel_by_id(config, &normalized)?;
-    zeroclaw_api::channel::Channel::send(
-        &*channel_inst,
-        &SendMessage::new(&safe_output, target),
-    )
-    .await
+    zeroclaw_api::channel::Channel::send(&*channel_inst, &SendMessage::new(&safe_output, target))
+        .await
 }
 
 #[cfg(test)]
@@ -12135,8 +12129,8 @@ This is an example JSON object for profile settings."#;
 mod cron_delivery_tests {
     use super::*;
     use async_trait::async_trait;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use zeroclaw_api::channel::{ChannelMessage, SendMessage};
 
     // The cron-delivery registry is process-global state. Cargo
@@ -12226,10 +12220,7 @@ mod cron_delivery_tests {
         let _serial = TEST_SERIAL.lock();
         clear_cron_delivery_registry_for_test();
         let stub = Arc::new(StubChannel::new("test-channel", true));
-        register_channel_for_delivery(
-            "test-channel",
-            stub.clone() as Arc<dyn Channel>,
-        );
+        register_channel_for_delivery("test-channel", stub.clone() as Arc<dyn Channel>);
 
         let cfg = empty_test_config();
         deliver_announcement(&cfg, "test-channel", "+15551234567", "hello world")
@@ -12263,10 +12254,7 @@ mod cron_delivery_tests {
         let _serial = TEST_SERIAL.lock();
         clear_cron_delivery_registry_for_test();
         let stub = Arc::new(StubChannel::new("test-channel", true));
-        register_channel_for_delivery(
-            "test-channel",
-            stub.clone() as Arc<dyn Channel>,
-        );
+        register_channel_for_delivery("test-channel", stub.clone() as Arc<dyn Channel>);
 
         let cfg = empty_test_config();
         // The LeakDetector treats AWS-shaped access keys as

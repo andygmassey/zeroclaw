@@ -999,10 +999,7 @@ fn check_imessage_tcc_component(
                 .unwrap_or("(no error message recorded)");
             items.push(DiagItem::error(cat, reason.to_string()));
         }
-        "starting" => items.push(DiagItem::warn(
-            cat,
-            "imessage-tcc probe pending",
-        )),
+        "starting" => items.push(DiagItem::warn(cat, "imessage-tcc probe pending")),
         other => items.push(DiagItem::warn(
             cat,
             format!("imessage-tcc status='{other}' (unrecognised)"),
@@ -1014,11 +1011,7 @@ fn check_imessage_tcc_component(
 
 fn check_imessage_tcc_inprocess(config: &Config, items: &mut Vec<DiagItem>) {
     let cat = "imessage-tcc";
-    let imessage_enabled = config
-        .channels
-        .imessage
-        .as_ref()
-        .is_some_and(|c| c.enabled);
+    let imessage_enabled = config.channels.imessage.as_ref().is_some_and(|c| c.enabled);
     if !imessage_enabled {
         return;
     }
