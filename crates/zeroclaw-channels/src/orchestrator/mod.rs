@@ -12216,6 +12216,7 @@ mod cron_delivery_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn deliver_announcement_uses_registered_instance() {
         let _serial = TEST_SERIAL.lock();
         clear_cron_delivery_registry_for_test();
@@ -12233,6 +12234,7 @@ mod cron_delivery_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn deliver_announcement_lowercases_channel_name_for_lookup() {
         // Operators may write `WhatsApp` / `WHATSAPP` / `whatsapp`
         // in their cron config. Lookup should be case-insensitive.
@@ -12250,6 +12252,7 @@ mod cron_delivery_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn deliver_announcement_runs_leak_detector_before_send() {
         let _serial = TEST_SERIAL.lock();
         clear_cron_delivery_registry_for_test();
@@ -12274,6 +12277,7 @@ mod cron_delivery_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn deliver_announcement_registry_miss_falls_back_to_factory() {
         // With an empty registry and an empty config, the
         // factory fallback in build_channel_by_id should report
