@@ -6428,6 +6428,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ostler-consent-gate"
+version = "0.7.3"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "page_size"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -134,7 +134,7 @@ pub enum GateError {
     /// The stored wording hash differs from the currently-bundled
     /// wording. Renewal flow needed before the gate opens.
     #[error(
-        "consent wording drift for tickbox '{0}': stored hash {stored} != bundled hash {bundled}; user must re-confirm new wording"
+        "consent wording drift for tickbox '{tickbox}': stored hash {stored} != bundled hash {bundled}; user must re-confirm new wording"
     )]
     WordingDrift {
         /// Tickbox id.
