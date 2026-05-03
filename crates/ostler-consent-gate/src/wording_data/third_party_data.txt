@@ -1,0 +1,16 @@
+[DRAFT – pending legal review]
+
+About the data on your Mac that's not just yours
+
+Ostler reads parts of your life that contain information about other people – emails they sent you, messages they wrote, faces in your photos, contact details, calendar attendees. This is normal. It's your inbox, your contacts, your life as it actually exists.
+
+Everything stays on this Mac. Creative Machines never receives any of it. There is no cloud account holding it.
+
+Before you continue, please understand:
+
+- You are keeping these records for yourself, like a private address book, a personal diary, or a journal. Ostler is the tool that helps you organise and search what you already have. You decide what to keep and what to delete.
+- Specific requests to be removed. If anyone you have records of asks you to be removed, you can delete that person from Ostler entirely (Settings → People → Delete a person). The deletion removes their data from your wiki, your graph, your search index, and your assistant's memory.
+- Nothing leaves your Mac. Not to us, not to a cloud, not to a third party – except in the specific cases listed in our Privacy Policy at ostler.ai/privacy (mainly: optional cloud routing for non-personal questions, software update checks, public metadata enrichment).
+
+[ ] I understand. Continue.
+[ ] Read more.   (links to docs.ostler.ai/privacy/third-party-data)

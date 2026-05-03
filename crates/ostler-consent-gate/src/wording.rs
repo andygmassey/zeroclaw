@@ -17,10 +17,12 @@
 //!     ARTICLE_9_EU_CONSENT,
 //!     WHATSAPP_UNOFFICIAL_RISK_CONSENT,
 //!     EU_VOICE_SPEAKER_ID_CONSENT,
+//!     THIRD_PARTY_DATA_NOTICE,
 //! )
-//! open('article_9.txt', 'w').write(ARTICLE_9_EU_CONSENT.text)
-//! open('whatsapp.txt', 'w').write(WHATSAPP_UNOFFICIAL_RISK_CONSENT.text)
-//! open('voice.txt',    'w').write(EU_VOICE_SPEAKER_ID_CONSENT.text)
+//! open('article_9.txt',       'w').write(ARTICLE_9_EU_CONSENT.text)
+//! open('whatsapp.txt',        'w').write(WHATSAPP_UNOFFICIAL_RISK_CONSENT.text)
+//! open('voice.txt',           'w').write(EU_VOICE_SPEAKER_ID_CONSENT.text)
+//! open('third_party_data.txt','w').write(THIRD_PARTY_DATA_NOTICE.text)
 //! "
 //! ```
 
@@ -32,3 +34,9 @@ pub const WHATSAPP_UNOFFICIAL_RISK_CONSENT: &str = include_str!("wording_data/wh
 
 /// EU voice speaker-ID gate wording (NOT emotion).
 pub const EU_VOICE_SPEAKER_ID_CONSENT: &str = include_str!("wording_data/voice.txt");
+
+/// Third-party-data acknowledgement (region-agnostic). Captures
+/// explicit user acknowledgement that they are processing data
+/// about other people (inbox / contacts / messages / photos /
+/// calendar attendees) at install time. Caveat 1.
+pub const THIRD_PARTY_DATA_NOTICE: &str = include_str!("wording_data/third_party_data.txt");

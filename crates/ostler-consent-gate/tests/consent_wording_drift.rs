@@ -50,6 +50,7 @@ fn known_tickboxes() -> &'static [Tickbox] {
         Tickbox::Article9SpecialCategory,
         Tickbox::WhatsAppUnofficialRisk,
         Tickbox::VoiceSpeakerIdEu,
+        Tickbox::ThirdPartyDataPersonalRecords,
     ]
 }
 

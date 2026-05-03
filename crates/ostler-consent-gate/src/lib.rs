@@ -92,6 +92,9 @@ pub enum Tickbox {
     WhatsAppUnofficialRisk,
     /// EU voice speaker-identification gate (NOT emotion).
     VoiceSpeakerIdEu,
+    /// Region-agnostic third-party-data acknowledgement
+    /// (Caveat 1, install-time).
+    ThirdPartyDataPersonalRecords,
 }
 
 impl Tickbox {
@@ -101,6 +104,7 @@ impl Tickbox {
             Self::Article9SpecialCategory => "article_9_special_category_consent",
             Self::WhatsAppUnofficialRisk => "whatsapp_unofficial_risk",
             Self::VoiceSpeakerIdEu => "voice_speaker_id_eu",
+            Self::ThirdPartyDataPersonalRecords => "third_party_data_personal_records",
         }
     }
 
@@ -110,6 +114,7 @@ impl Tickbox {
             Self::Article9SpecialCategory => wording::ARTICLE_9_EU_CONSENT,
             Self::WhatsAppUnofficialRisk => wording::WHATSAPP_UNOFFICIAL_RISK_CONSENT,
             Self::VoiceSpeakerIdEu => wording::EU_VOICE_SPEAKER_ID_CONSENT,
+            Self::ThirdPartyDataPersonalRecords => wording::THIRD_PARTY_DATA_NOTICE,
         };
         let mut hasher = Sha256::new();
         hasher.update(text.as_bytes());
@@ -321,11 +326,44 @@ mod tests {
         let a = Tickbox::Article9SpecialCategory.bundled_wording_hash();
         let b = Tickbox::WhatsAppUnofficialRisk.bundled_wording_hash();
         let c = Tickbox::VoiceSpeakerIdEu.bundled_wording_hash();
+        let d = Tickbox::ThirdPartyDataPersonalRecords.bundled_wording_hash();
         assert_ne!(a, b);
         assert_ne!(b, c);
         assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_ne!(b, d);
+        assert_ne!(c, d);
         assert_eq!(a.len(), 64);
         assert_eq!(b.len(), 64);
         assert_eq!(c.len(), 64);
+        assert_eq!(d.len(), 64);
+    }
+
+    #[test]
+    fn test_third_party_data_wording_present() {
+        // Caveat 1 spec test: the bundled wording must be non-empty,
+        // contain the canonical heading we ship, and produce the
+        // pinned hash that HR015's tests/consent_wording_hashes.json
+        // also pins. Drift between Python source and this Rust mirror
+        // fails this test (and also fails the integration drift test
+        // in tests/consent_wording_drift.rs).
+        let text = wording::THIRD_PARTY_DATA_NOTICE;
+        assert!(
+            !text.is_empty(),
+            "third-party-data wording must be non-empty"
+        );
+        assert!(
+            text.contains("About the data on your Mac that's not just yours"),
+            "third-party-data wording is missing its canonical heading"
+        );
+        let id = Tickbox::ThirdPartyDataPersonalRecords.id();
+        assert_eq!(id, "third_party_data_personal_records");
+        let hash = Tickbox::ThirdPartyDataPersonalRecords.bundled_wording_hash();
+        assert_eq!(
+            hash, "a6f631e93c937a9bddd51ca67742e4caaf59cb9263743413d31c5c355112bd04",
+            "third-party-data hash drifted from HR015's pinned value; \
+             regenerate wording_data/third_party_data.txt + bump \
+             tests/consent_wording_hashes.json on BOTH sides"
+        );
     }
 }
