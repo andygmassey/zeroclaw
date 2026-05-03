@@ -1494,9 +1494,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn persist_job_result_delivery_stubbed_succeeds() {
-        // Delivery is stubbed (moved to zeroclaw-channels orchestrator).
-        // This test verifies the stub returns Ok, so persist_job_result succeeds.
+    async fn persist_job_result_delivery_failure_strict_flips_to_error() {
+        // Strict-mode contract (`delivery.best_effort = false`): when
+        // `deliver_announcement` returns an error -- including the
+        // "no DELIVERY_FN registered" case introduced when delivery
+        // moved to the zeroclaw-channels orchestrator --
+        // `persist_job_result` MUST flip the caller-supplied
+        // `success: true / status: "ok"` to `success: false /
+        // status: "error"` before recording the run. The
+        // best_effort=true counterpart is covered by
+        // `persist_job_result_delivery_failure_best_effort_keeps_success`.
+        //
+        // No `register_delivery_fn` setup here on purpose: the
+        // sibling tests `deliver_if_configured_announce_returns_err_when_no_handler`
+        // and `deliver_announcement_errors_with_unregistered_handler`
+        // both rely on DELIVERY_FN being unset for the lifetime of
+        // the test process (OnceLock cannot be reset). Registering
+        // a stub here would race against them and produce
+        // ordering-dependent failures.
         let tmp = TempDir::new().unwrap();
         let config = test_config(&tmp).await;
         let job = cron::add_agent_job(
@@ -1514,9 +1529,9 @@ mod tests {
                 channel: Some("telegram".into()),
                 to: Some("123456".into()),
                 best_effort: false,
-                // 0 disables the readiness gate so this test
-                // exercises the legacy delivery path without
-                // waiting for a probe that nothing here registers.
+                // 0 disables the readiness gate so the path goes
+                // straight to deliver_announcement and surfaces
+                // the missing-handler error.
                 max_wait_secs: 0,
                 startup_grace_secs: 0,
             }),
@@ -1528,15 +1543,21 @@ mod tests {
         let finished = started + ChronoDuration::milliseconds(10);
 
         let success = persist_job_result(&config, &job, true, "ok", started, finished).await;
-        assert!(success);
+        assert!(
+            !success,
+            "best_effort=false must flip success to false on delivery failure"
+        );
 
         let updated = cron::get_job(&config, &job.id).unwrap();
-        assert!(updated.enabled);
-        assert_eq!(updated.last_status.as_deref(), Some("ok"));
+        assert_eq!(
+            updated.last_status.as_deref(),
+            Some("error"),
+            "last_status must be \"error\" so the operator can see the failure"
+        );
 
         let runs = cron::list_runs(&config, &job.id, 10).unwrap();
         assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].status, "ok");
+        assert_eq!(runs[0].status, "error");
     }
 
     #[tokio::test]
