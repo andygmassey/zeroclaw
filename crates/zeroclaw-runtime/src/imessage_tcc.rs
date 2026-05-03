@@ -123,6 +123,12 @@ pub fn probe() -> ImessageTccStatus {
 /// Classify osascript stderr into the canonical TCC error class.
 /// Pulled out so unit tests can lock the parsing without spawning
 /// `osascript`.
+///
+/// Compiled on macOS (where the macOS `probe()` calls it) and in
+/// any test build (so the unit tests below run on all platforms).
+/// Without the cfg the non-macOS build sees this function as dead
+/// code and `clippy -D warnings` rejects the workspace.
+#[cfg(any(target_os = "macos", test))]
 fn classify_stderr(stderr: &str) -> ImessageTccStatus {
     let lower = stderr.to_ascii_lowercase();
     if stderr.contains("-1743")

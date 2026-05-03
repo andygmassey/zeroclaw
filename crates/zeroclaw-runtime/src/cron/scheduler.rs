@@ -763,8 +763,8 @@ impl SweepPlan {
 }
 
 /// Build the de-duplicated sweep plan from a list of cron jobs.
-/// Pulled out as a pure fn so unit tests can exercise the filter
-/// + dedup + max-grace computation without sleeping or touching
+/// Pulled out as a pure fn so unit tests can exercise the filter,
+/// dedup, and max-grace computation without sleeping or touching
 /// the global readiness probe.
 pub(crate) fn build_sweep_plan(jobs: &[CronJob]) -> SweepPlan {
     let mut targets: Vec<SweepTarget> = Vec::new();
