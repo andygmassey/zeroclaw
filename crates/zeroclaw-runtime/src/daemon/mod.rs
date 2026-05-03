@@ -230,8 +230,7 @@ pub async fn run(
         // /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md.
         let sweep_cfg = config.clone();
         handles.push(tokio::spawn(async move {
-            crate::cron::scheduler::run_startup_readiness_sweep(sweep_cfg)
-                .await;
+            crate::cron::scheduler::run_startup_readiness_sweep(sweep_cfg).await;
         }));
     } else {
         crate::health::mark_component_ok("scheduler");
@@ -245,24 +244,14 @@ pub async fn run(
     // been silently failing. Skipped when iMessage is not enabled
     // in config; on non-macOS the probe is a no-op that marks ok.
     // Piece D / task #278.
-    let imessage_enabled = config
-        .channels
-        .imessage
-        .as_ref()
-        .is_some_and(|c| c.enabled);
+    let imessage_enabled = config.channels.imessage.as_ref().is_some_and(|c| c.enabled);
     if imessage_enabled {
         handles.push(tokio::spawn(async move {
             // `osascript` is blocking; run on the blocking pool.
-            let outcome = match tokio::task::spawn_blocking(
-                crate::imessage_tcc::probe,
-            )
-            .await
-            {
+            let outcome = match tokio::task::spawn_blocking(crate::imessage_tcc::probe).await {
                 Ok(status) => status,
                 Err(err) => {
-                    tracing::warn!(
-                        "imessage-tcc probe task panicked: {err}"
-                    );
+                    tracing::warn!("imessage-tcc probe task panicked: {err}");
                     return;
                 }
             };
@@ -283,9 +272,7 @@ pub async fn run(
                     );
                 }
                 crate::imessage_tcc::ImessageTccStatus::Unknown(reason) => {
-                    tracing::warn!(
-                        "imessage-tcc probe returned unknown status: {reason}"
-                    );
+                    tracing::warn!("imessage-tcc probe returned unknown status: {reason}");
                     // Don't mark error -- the probe itself is uncertain;
                     // doctor will surface as a warn.
                 }

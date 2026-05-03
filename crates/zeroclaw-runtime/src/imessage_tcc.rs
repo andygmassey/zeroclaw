@@ -78,9 +78,7 @@ pub fn probe() -> ImessageTccStatus {
     {
         Ok(child) => child,
         Err(err) => {
-            return ImessageTccStatus::Unknown(format!(
-                "failed to spawn osascript: {err}"
-            ));
+            return ImessageTccStatus::Unknown(format!("failed to spawn osascript: {err}"));
         }
     };
 
@@ -97,9 +95,7 @@ pub fn probe() -> ImessageTccStatus {
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(50)),
             Err(err) => {
-                return ImessageTccStatus::Unknown(format!(
-                    "osascript wait failed: {err}"
-                ));
+                return ImessageTccStatus::Unknown(format!("osascript wait failed: {err}"));
             }
         }
     }
@@ -107,9 +103,7 @@ pub fn probe() -> ImessageTccStatus {
     let output = match child.wait_with_output() {
         Ok(o) => o,
         Err(err) => {
-            return ImessageTccStatus::Unknown(format!(
-                "osascript output read failed: {err}"
-            ));
+            return ImessageTccStatus::Unknown(format!("osascript output read failed: {err}"));
         }
     };
 
@@ -160,10 +154,7 @@ mod tests {
     #[test]
     fn classify_stderr_recognises_us_spelling() {
         let raw = "Not authorized to send Apple events to Messages.";
-        assert!(matches!(
-            classify_stderr(raw),
-            ImessageTccStatus::Denied(_)
-        ));
+        assert!(matches!(classify_stderr(raw), ImessageTccStatus::Denied(_)));
     }
 
     #[test]
@@ -182,7 +173,11 @@ mod tests {
             ImessageTccStatus::Denied("x".into()).as_health_status(),
             Some("error")
         );
-        assert!(ImessageTccStatus::Unknown("x".into()).as_health_status().is_none());
+        assert!(
+            ImessageTccStatus::Unknown("x".into())
+                .as_health_status()
+                .is_none()
+        );
         assert!(ImessageTccStatus::NotMacOs.as_health_status().is_none());
     }
 }

@@ -259,7 +259,10 @@ fn format_prompt_one_candidate_still_offers_other_option() {
     let body = format_prompt(&ask);
     assert!(body.contains("A) Alice"));
     assert!(body.contains("B) Other?"));
-    assert!(!body.contains("C) "), "no third option without runner-up: {body}");
+    assert!(
+        !body.contains("C) "),
+        "no third option without runner-up: {body}"
+    );
 }
 
 #[test]

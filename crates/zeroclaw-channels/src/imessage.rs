@@ -337,10 +337,7 @@ impl IMessageChannel {
     /// We drain + truncate atomically per poll cycle.
     const BRIDGE_INBOX_PATH: &'static str = "/Users/Shared/imessage-bridge/inbox.jsonl";
 
-    async fn poll_bridge_inbox(
-        &self,
-        tx: &mpsc::Sender<ChannelMessage>,
-    ) -> anyhow::Result<()> {
+    async fn poll_bridge_inbox(&self, tx: &mpsc::Sender<ChannelMessage>) -> anyhow::Result<()> {
         let path = std::path::Path::new(Self::BRIDGE_INBOX_PATH);
         if !path.exists() {
             return Ok(());
@@ -369,14 +366,15 @@ impl IMessageChannel {
             let rowid = entry.get("rowid").and_then(|v| v.as_i64()).unwrap_or(0);
             let sender = entry.get("sender").and_then(|v| v.as_str()).unwrap_or("");
             let text = entry.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            let timestamp = entry.get("timestamp").and_then(|v| v.as_u64()).unwrap_or_else(
-                || {
+            let timestamp = entry
+                .get("timestamp")
+                .and_then(|v| v.as_u64())
+                .unwrap_or_else(|| {
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs()
-                },
-            );
+                });
 
             if sender.is_empty() || text.trim().is_empty() {
                 continue;

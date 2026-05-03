@@ -269,9 +269,9 @@ impl WingResolutionBridge {
 
     async fn quarantine(&self, path: &Path) -> Result<()> {
         let dest_dir = self.queue_dir.join(QUARANTINE_SUBDIR);
-        fs::create_dir_all(&dest_dir).await.with_context(|| {
-            format!("failed to ensure quarantine dir {}", dest_dir.display())
-        })?;
+        fs::create_dir_all(&dest_dir)
+            .await
+            .with_context(|| format!("failed to ensure quarantine dir {}", dest_dir.display()))?;
         let name = path
             .file_name()
             .map(std::ffi::OsStr::to_os_string)

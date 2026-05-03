@@ -1466,14 +1466,11 @@ async fn main() -> Result<()> {
             // WhatsApp Web client finished its WS handshake and
             // silently dropped the morning brief.
             #[cfg(feature = "agent-runtime")]
-            zeroclaw_runtime::cron::scheduler::register_readiness_fn(Box::new(
-                |channel| {
-                    Box::pin(async move {
-                        zeroclaw_channels::orchestrator::channel_is_ready(&channel)
-                            .await
-                    })
-                },
-            ));
+            zeroclaw_runtime::cron::scheduler::register_readiness_fn(Box::new(|channel| {
+                Box::pin(async move {
+                    zeroclaw_channels::orchestrator::channel_is_ready(&channel).await
+                })
+            }));
 
             let subsystems = daemon::DaemonSubsystems {
                 #[cfg(feature = "gateway")]
@@ -3307,9 +3304,9 @@ fn pwg_wing_resolution_start_fn(
     Box<
         dyn Fn(
                 Config,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>,
-            > + Send
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>
+            + Send
             + Sync,
     >,
 > {

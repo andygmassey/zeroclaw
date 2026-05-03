@@ -122,7 +122,9 @@ impl Tickbox {
 pub enum GateError {
     /// No record exists for the requested tickbox at all. The user
     /// has not been shown the consent screen.
-    #[error("consent record missing for tickbox '{0}': run install.sh or `ostler-assistant setup channels --interactive`")]
+    #[error(
+        "consent record missing for tickbox '{0}': run install.sh or `ostler-assistant setup channels --interactive`"
+    )]
     Missing(String),
 
     /// The user explicitly declined. The daemon must not start.
@@ -131,7 +133,9 @@ pub enum GateError {
 
     /// The stored wording hash differs from the currently-bundled
     /// wording. Renewal flow needed before the gate opens.
-    #[error("consent wording drift for tickbox '{0}': stored hash {stored} != bundled hash {bundled}; user must re-confirm new wording")]
+    #[error(
+        "consent wording drift for tickbox '{0}': stored hash {stored} != bundled hash {bundled}; user must re-confirm new wording"
+    )]
     WordingDrift {
         /// Tickbox id.
         tickbox: String,
@@ -264,10 +268,7 @@ mod tests {
     #[test]
     fn record_missing_is_missing_error() {
         let td = tempfile::tempdir().unwrap();
-        let path = write_registry(
-            td.path(),
-            r#"{"schema_version":1,"records":{}}"#,
-        );
+        let path = write_registry(td.path(), r#"{"schema_version":1,"records":{}}"#);
         let err = require_at(Tickbox::WhatsAppUnofficialRisk, &path).unwrap_err();
         assert!(matches!(err, GateError::Missing(_)));
     }

@@ -114,9 +114,7 @@ pub async fn run(config: Config, event_tx: EventBroadcast) -> Result<()> {
 /// each one that opts into legacy silent-failure semantics (piece E).
 /// Pulled out so unit tests can exercise the predicate without
 /// running the full scheduler.
-pub(crate) fn warn_on_best_effort_declarative_jobs(
-    jobs: &[CronJobDecl],
-) -> Vec<String> {
+pub(crate) fn warn_on_best_effort_declarative_jobs(jobs: &[CronJobDecl]) -> Vec<String> {
     let mut warned: Vec<String> = Vec::new();
     for job in jobs {
         let Some(delivery) = job.delivery.as_ref() else {
@@ -128,10 +126,7 @@ pub(crate) fn warn_on_best_effort_declarative_jobs(
         if !delivery.best_effort {
             continue;
         }
-        let channel = delivery
-            .channel
-            .as_deref()
-            .unwrap_or("(unset)");
+        let channel = delivery.channel.as_deref().unwrap_or("(unset)");
         tracing::warn!(
             job_id = %job.id,
             channel = %channel,
@@ -541,12 +536,7 @@ async fn deliver_if_configured(config: &Config, job: &CronJob, output: &str) -> 
     // max_wait_secs == 0 disables the gate entirely (escape
     // hatch for operators who would rather fail fast than wait).
     if delivery.max_wait_secs > 0 {
-        match wait_for_channel_ready(
-            channel,
-            delivery.max_wait_secs,
-            Duration::from_secs(1),
-        )
-        .await
+        match wait_for_channel_ready(channel, delivery.max_wait_secs, Duration::from_secs(1)).await
         {
             Ok(()) => {}
             Err(err) => {
@@ -556,10 +546,7 @@ async fn deliver_if_configured(config: &Config, job: &CronJob, output: &str) -> 
                 // operator before they notice their morning brief is
                 // missing. Piece D of
                 // /tmp/tnm_brief_zeroclaw_cron_diagnosis_2026-05-02.md.
-                crate::health::mark_component_error(
-                    "cron-delivery",
-                    err.to_string(),
-                );
+                crate::health::mark_component_error("cron-delivery", err.to_string());
                 return Err(anyhow!("{err}"));
             }
         }
@@ -665,8 +652,7 @@ where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = bool>,
 {
-    let deadline =
-        tokio::time::Instant::now() + Duration::from_secs(max_wait_secs);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(max_wait_secs);
     loop {
         if is_ready(channel.to_string()).await {
             return Ok(());
@@ -719,9 +705,7 @@ pub async fn run_startup_readiness_sweep(config: Config) {
     let jobs = match crate::cron::list_jobs(&config) {
         Ok(j) => j,
         Err(e) => {
-            tracing::warn!(
-                "cron-delivery startup sweep: cannot enumerate jobs: {e}"
-            );
+            tracing::warn!("cron-delivery startup sweep: cannot enumerate jobs: {e}");
             return;
         }
     };
@@ -735,14 +719,11 @@ pub async fn run_startup_readiness_sweep(config: Config) {
     }
 
     if plan.max_grace_secs > 0 {
-        tokio::time::sleep(Duration::from_secs(plan.max_grace_secs))
-            .await;
+        tokio::time::sleep(Duration::from_secs(plan.max_grace_secs)).await;
     }
 
-    let not_ready = probe_sweep_plan(&plan, |c| async move {
-        check_channel_readiness(&c).await
-    })
-    .await;
+    let not_ready =
+        probe_sweep_plan(&plan, |c| async move { check_channel_readiness(&c).await }).await;
 
     if not_ready.is_empty() {
         crate::health::mark_component_ok(COMPONENT);
@@ -787,8 +768,7 @@ impl SweepPlan {
 /// the global readiness probe.
 pub(crate) fn build_sweep_plan(jobs: &[CronJob]) -> SweepPlan {
     let mut targets: Vec<SweepTarget> = Vec::new();
-    let mut seen: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut max_grace: u64 = 0;
 
     for job in jobs {
@@ -829,10 +809,7 @@ pub(crate) fn build_sweep_plan(jobs: &[CronJob]) -> SweepPlan {
 /// Returns formatted "'channel' (job id)" strings for targets
 /// whose probe returned false. Pulled out so tests can pass an
 /// in-memory probe instead of the global OnceLock.
-pub(crate) async fn probe_sweep_plan<F, Fut>(
-    plan: &SweepPlan,
-    is_ready: F,
-) -> Vec<String>
+pub(crate) async fn probe_sweep_plan<F, Fut>(plan: &SweepPlan, is_ready: F) -> Vec<String>
 where
     F: Fn(String) -> Fut,
     Fut: std::future::Future<Output = bool>,
@@ -840,10 +817,7 @@ where
     let mut not_ready = Vec::new();
     for target in &plan.targets {
         if !is_ready(target.channel.clone()).await {
-            not_ready.push(format!(
-                "'{}' (job {})",
-                target.channel, target.job_id
-            ));
+            not_ready.push(format!("'{}' (job {})", target.channel, target.job_id));
         }
     }
     not_ready
@@ -1858,23 +1832,17 @@ mod tests {
     async fn pre_flight_succeeds_when_channel_becomes_ready_mid_wait() {
         // Probe returns false 3 times, then true. Exercises the
         // bounded retry path -- the workhorse of piece C.
-        let attempts = std::sync::Arc::new(
-            std::sync::atomic::AtomicUsize::new(0),
-        );
+        let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let attempts_clone = attempts.clone();
-        let result = wait_until_ready_with(
-            "stub-channel",
-            120,
-            Duration::from_millis(10),
-            move |_| {
+        let result =
+            wait_until_ready_with("stub-channel", 120, Duration::from_millis(10), move |_| {
                 let attempts = attempts_clone.clone();
                 async move {
                     let n = attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     n >= 3
                 }
-            },
-        )
-        .await;
+            })
+            .await;
 
         assert!(result.is_ok(), "becomes-ready probe should yield Ok");
         // 3 not-ready probes (n=0,1,2) + 1 ready probe (n=3) = 4
@@ -1904,9 +1872,7 @@ mod tests {
                 assert_eq!(channel, "stuck-channel");
                 assert_eq!(waited_secs, 2);
             }
-            other => panic!(
-                "expected DeliveryError::ChannelNotReady; got {other:?}"
-            ),
+            other => panic!("expected DeliveryError::ChannelNotReady; got {other:?}"),
         }
     }
 
@@ -2079,10 +2045,7 @@ mod tests {
 
     // ── best_effort warn-on-load (piece E) ─────────────────────
 
-    fn declarative_announce_job(
-        id: &str,
-        best_effort: bool,
-    ) -> CronJobDecl {
+    fn declarative_announce_job(id: &str, best_effort: bool) -> CronJobDecl {
         CronJobDecl {
             id: id.into(),
             name: None,
@@ -2169,8 +2132,7 @@ mod tests {
             channel = "whatsapp"
             to = "123456"
         "#;
-        let decl: zeroclaw_config::schema::DeliveryConfigDecl =
-            toml::from_str(toml_src).unwrap();
+        let decl: zeroclaw_config::schema::DeliveryConfigDecl = toml::from_str(toml_src).unwrap();
         assert!(!decl.best_effort);
         // And explicit true still parses as true (Andy's
         // existing config keeps its semantic).
@@ -2194,8 +2156,7 @@ mod tests {
             }],
             max_grace_secs: 60,
         };
-        let not_ready =
-            probe_sweep_plan(&plan, |_| async move { true }).await;
+        let not_ready = probe_sweep_plan(&plan, |_| async move { true }).await;
         assert!(not_ready.is_empty());
     }
 }
