@@ -6,9 +6,17 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use zeroclaw_api::tool::{Tool, ToolResult};
 
+/// Default Vane base URL: the bundled Vane container in
+/// CM051 #32 listens on loopback at `127.0.0.1:3000`. Used when
+/// neither the boot-time config nor the on-disk `config.toml` set
+/// an explicit `[web_search] vane_url`.
+pub const DEFAULT_VANE_URL: &str = "http://localhost:3000";
+
 /// Web search tool for searching the internet.
-/// Supports multiple providers: DuckDuckGo (free), Brave (requires API key),
-/// SearXNG (self-hosted, requires instance URL).
+/// Supports multiple providers: Vane (local, default for fresh
+/// installs from CM051 #32 forward), DuckDuckGo (free), Brave
+/// (requires API key), and SearXNG (self-hosted, requires instance
+/// URL).
 ///
 /// The Brave API key is resolved lazily at execution time: if the boot-time key
 /// is missing or still encrypted, the tool re-reads `config.toml`, decrypts the
@@ -21,6 +29,12 @@ pub struct WebSearchTool {
     boot_brave_api_key: Option<String>,
     /// SearXNG instance base URL (e.g. "https://searx.example.com").
     searxng_instance_url: Option<String>,
+    /// Vane base URL (e.g. "http://localhost:3000"). When `None`, the
+    /// runtime falls back to `DEFAULT_VANE_URL` after first checking
+    /// `config.toml` for an override. Stored as `Option` (rather than
+    /// pre-resolved) so the same lazy-reload path SearXNG uses applies
+    /// here without a behavioural fork.
+    vane_url: Option<String>,
     max_results: usize,
     timeout_secs: u64,
     /// Path to `config.toml` for lazy re-read of keys at execution time.
@@ -40,6 +54,7 @@ impl WebSearchTool {
             provider: provider.trim().to_lowercase(),
             boot_brave_api_key: brave_api_key,
             searxng_instance_url: None,
+            vane_url: None,
             max_results: max_results.clamp(1, 10),
             timeout_secs: timeout_secs.max(1),
             config_path: PathBuf::new(),
@@ -52,10 +67,12 @@ impl WebSearchTool {
     /// `config_path` is the path to `config.toml` so the tool can re-read the
     /// Brave API key at execution time. `secrets_encrypt` controls whether the
     /// key is decrypted via `SecretStore`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_config(
         provider: String,
         brave_api_key: Option<String>,
         searxng_instance_url: Option<String>,
+        vane_url: Option<String>,
         max_results: usize,
         timeout_secs: u64,
         config_path: PathBuf,
@@ -65,6 +82,7 @@ impl WebSearchTool {
             provider: provider.trim().to_lowercase(),
             boot_brave_api_key: brave_api_key,
             searxng_instance_url,
+            vane_url,
             max_results: max_results.clamp(1, 10),
             timeout_secs: timeout_secs.max(1),
             config_path,
@@ -360,6 +378,183 @@ impl WebSearchTool {
 
         Ok(lines.join("\n"))
     }
+
+    /// Resolve the Vane base URL: boot-time value if set, else
+    /// `config.toml`, else `DEFAULT_VANE_URL`. Always returns a value
+    /// (never errors), because every fresh Ostler install bundles
+    /// Vane on `localhost:3000` and we always have a sensible default
+    /// to fall back to.
+    fn resolve_vane_url(&self) -> String {
+        if let Some(ref url) = self.vane_url
+            && !url.trim().is_empty()
+        {
+            return url.trim().to_string();
+        }
+
+        if let Ok(contents) = std::fs::read_to_string(&self.config_path)
+            && let Ok(config) = toml::from_str::<zeroclaw_config::schema::Config>(&contents)
+            && let Some(url) = config.web_search.vane_url.as_deref()
+            && !url.trim().is_empty()
+        {
+            return url.trim().to_string();
+        }
+
+        DEFAULT_VANE_URL.to_string()
+    }
+
+    /// Search via the bundled Vane container (Perplexica-compatible
+    /// API at `<base>/api/search`).
+    ///
+    /// Vane returns both an LLM-synthesised `message` and a `sources`
+    /// array of citations; both are surfaced to the caller. The
+    /// minimum request body is `{query, sources, optimizationMode,
+    /// history, stream}`; the model selection fields (`chatModel`,
+    /// `embeddingModel`) are intentionally omitted so Vane uses the
+    /// provider it was configured with at install time (typically the
+    /// local Ollama).
+    ///
+    /// Graceful-degradation policy: if Vane is unreachable
+    /// (container not running, port blocked) the caller gets a
+    /// human-readable empty-results message rather than an error.
+    /// 5xx from Vane is treated the same way (running but broken).
+    /// 4xx still bubbles up because that points at a client bug we
+    /// want to notice. See `parse_vane_results` for the success-path
+    /// shape.
+    async fn search_vane(&self, query: &str) -> anyhow::Result<String> {
+        let base_url = self.resolve_vane_url();
+        let trimmed = base_url.trim_end_matches('/');
+        let url = format!("{}/api/search", trimmed);
+
+        let body = json!({
+            "query": query,
+            "sources": ["web"],
+            "optimizationMode": "speed",
+            "history": [],
+            "stream": false,
+        });
+
+        let builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(self.timeout_secs))
+            .user_agent("Ostler/1.0 (Vane web search)");
+        let builder =
+            zeroclaw_config::schema::apply_runtime_proxy_to_builder(builder, "tool.web_search");
+        let client = builder.build()?;
+
+        let response = match client
+            .post(&url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "Vane web search unreachable at {}: {}. \
+                     Returning empty results so the assistant can keep responding.",
+                    base_url,
+                    e
+                );
+                return Ok(format!(
+                    "Web search via Vane is currently unavailable: the local Vane container at {} did not respond. \
+                     Try `docker compose -f ~/.ostler/docker-compose.yml up -d vane` and run the search again.",
+                    base_url
+                ));
+            }
+        };
+
+        let status = response.status();
+        if status.is_server_error() {
+            tracing::warn!(
+                "Vane returned {} for {}. Treating as 'no results' so the assistant can continue.",
+                status,
+                url
+            );
+            return Ok(format!(
+                "Web search via Vane returned a server error ({}) for: {}. \
+                 The container may be starting up or its upstream search index is unreachable.",
+                status, query
+            ));
+        }
+        if !status.is_success() {
+            anyhow::bail!("Vane search failed with status: {}", status);
+        }
+
+        let json: serde_json::Value = response.json().await?;
+        self.parse_vane_results(&json, query)
+    }
+
+    fn parse_vane_results(&self, json: &serde_json::Value, query: &str) -> anyhow::Result<String> {
+        // Vane response shape (Perplexica-compatible, non-streaming):
+        //   { "message": "...synthesised answer...",
+        //     "sources": [ { "content": "...", "metadata": { "title": "...", "url": "..." } } ] }
+        // Either `message` or `sources` may be empty; we surface
+        // whichever is present and emit a "no results" line if both
+        // are empty.
+
+        let message = json
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty());
+
+        let sources_array = json
+            .get("sources")
+            .and_then(|s| s.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        if message.is_none() && sources_array.is_empty() {
+            return Ok(format!("No results found for: {}", query));
+        }
+
+        let mut lines = vec![format!("Web search results for: {} (via Vane)", query)];
+
+        if let Some(msg) = message {
+            lines.push(String::new());
+            lines.push("Vane's synthesis:".to_string());
+            lines.push(msg.to_string());
+        }
+
+        if !sources_array.is_empty() {
+            lines.push(String::new());
+            lines.push("Sources:".to_string());
+            for (i, source) in sources_array.iter().take(self.max_results).enumerate() {
+                let title = source
+                    .get("metadata")
+                    .and_then(|m| m.get("title"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("No title");
+                let url = source
+                    .get("metadata")
+                    .and_then(|m| m.get("url"))
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("");
+                let content = source.get("content").and_then(|c| c.as_str()).unwrap_or("");
+
+                lines.push(format!("{}. {}", i + 1, title));
+                if !url.is_empty() {
+                    lines.push(format!("   {}", url));
+                }
+                if !content.is_empty() {
+                    // Trim long content snippets so the tool output
+                    // does not overwhelm the LLM context window;
+                    // keeping ~400 chars per source is enough for
+                    // grounding without becoming the whole response.
+                    let snippet: String = content.chars().take(400).collect();
+                    let suffix = if content.chars().count() > 400 {
+                        " ..."
+                    } else {
+                        ""
+                    };
+                    lines.push(format!("   {}{}", snippet.trim(), suffix));
+                }
+            }
+        }
+
+        Ok(lines.join("\n"))
+    }
 }
 
 fn decode_ddg_redirect_url(raw_url: &str) -> String {
@@ -429,6 +624,7 @@ impl Tool for WebSearchTool {
             } // TODO: implement Tavily search
             WebSearchProviderRoute::Brave => self.search_brave(query).await?,
             WebSearchProviderRoute::SearXNG => self.search_searxng(query).await?,
+            WebSearchProviderRoute::Vane => self.search_vane(query).await?,
         };
 
         Ok(ToolResult {
@@ -562,6 +758,7 @@ mod tests {
             "brave".to_string(),
             None,
             None,
+            None,
             5,
             15,
             config_path,
@@ -589,6 +786,7 @@ mod tests {
             "brave".to_string(),
             Some(encrypted),
             None,
+            None,
             5,
             15,
             config_path,
@@ -606,6 +804,7 @@ mod tests {
 
         let tool = WebSearchTool::new_with_config(
             "searxng".to_string(),
+            None,
             None,
             None,
             5,
@@ -675,6 +874,7 @@ mod tests {
             provider: "searxng".to_string(),
             boot_brave_api_key: None,
             searxng_instance_url: Some("https://searx.example.com".to_string()),
+            vane_url: None,
             max_results: 5,
             timeout_secs: 15,
             config_path: PathBuf::new(),
@@ -698,6 +898,7 @@ mod tests {
             "searxng".to_string(),
             None,
             None,
+            None,
             5,
             15,
             config_path,
@@ -719,6 +920,7 @@ mod tests {
             "brave".to_string(),
             None,
             None,
+            None,
             5,
             15,
             config_path.clone(),
@@ -738,5 +940,227 @@ mod tests {
         // Now should succeed with the updated key
         let key = tool.resolve_brave_api_key().unwrap();
         assert_eq!(key, "runtime-updated-key");
+    }
+
+    // ── Vane provider tests ────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_vane_url_falls_back_to_default() {
+        // Empty config + no boot value -> DEFAULT_VANE_URL.
+        let tool = WebSearchTool::new("vane".to_string(), None, 5, 15);
+        let url = tool.resolve_vane_url();
+        assert_eq!(url, DEFAULT_VANE_URL);
+    }
+
+    #[test]
+    fn test_resolve_vane_url_from_boot() {
+        let tool = WebSearchTool {
+            provider: "vane".to_string(),
+            boot_brave_api_key: None,
+            searxng_instance_url: None,
+            vane_url: Some("http://192.168.1.10:3000".to_string()),
+            max_results: 5,
+            timeout_secs: 15,
+            config_path: PathBuf::new(),
+            secrets_encrypt: false,
+        };
+        assert_eq!(tool.resolve_vane_url(), "http://192.168.1.10:3000");
+    }
+
+    #[test]
+    fn test_resolve_vane_url_reloads_from_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "[web_search]\nvane_url = \"http://hub.local:3000\"\n",
+        )
+        .unwrap();
+
+        // No boot value, but config.toml has one.
+        let tool = WebSearchTool::new_with_config(
+            "vane".to_string(),
+            None,
+            None,
+            None,
+            5,
+            15,
+            config_path,
+            false,
+        );
+        assert_eq!(tool.resolve_vane_url(), "http://hub.local:3000");
+    }
+
+    #[test]
+    fn test_resolve_vane_url_blank_falls_through_to_config_then_default() {
+        // Blank/whitespace boot value should not be treated as an
+        // override; the resolver continues to config.toml, then to
+        // DEFAULT_VANE_URL when neither is set.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(&config_path, "[web_search]\n").unwrap();
+
+        let tool = WebSearchTool::new_with_config(
+            "vane".to_string(),
+            None,
+            None,
+            Some("   ".to_string()),
+            5,
+            15,
+            config_path,
+            false,
+        );
+        assert_eq!(tool.resolve_vane_url(), DEFAULT_VANE_URL);
+    }
+
+    #[test]
+    fn test_parse_vane_results_with_message_and_sources() {
+        let tool = WebSearchTool::new("vane".to_string(), None, 5, 15);
+        let json = serde_json::json!({
+            "message": "Vane is a self-hosted AI search engine.",
+            "sources": [
+                {
+                    "content": "Vane is innovative, open-source AI-powered search.",
+                    "metadata": {
+                        "title": "What is Vane",
+                        "url": "https://example.com/vane"
+                    }
+                },
+                {
+                    "content": "It uses local LLMs for synthesis.",
+                    "metadata": {
+                        "title": "Vane architecture",
+                        "url": "https://example.com/vane/arch"
+                    }
+                }
+            ]
+        });
+        let result = tool.parse_vane_results(&json, "what is vane").unwrap();
+        assert!(result.contains("via Vane"));
+        assert!(result.contains("Vane's synthesis:"));
+        assert!(result.contains("Vane is a self-hosted AI search engine."));
+        assert!(result.contains("Sources:"));
+        assert!(result.contains("1. What is Vane"));
+        assert!(result.contains("https://example.com/vane"));
+        assert!(result.contains("2. Vane architecture"));
+    }
+
+    #[test]
+    fn test_parse_vane_results_message_only_no_sources() {
+        let tool = WebSearchTool::new("vane".to_string(), None, 5, 15);
+        let json = serde_json::json!({
+            "message": "Synthesis with no citations.",
+            "sources": []
+        });
+        let result = tool.parse_vane_results(&json, "test").unwrap();
+        assert!(result.contains("Vane's synthesis:"));
+        assert!(result.contains("Synthesis with no citations."));
+        assert!(!result.contains("Sources:"));
+    }
+
+    #[test]
+    fn test_parse_vane_results_sources_only_no_message() {
+        let tool = WebSearchTool::new("vane".to_string(), None, 5, 15);
+        let json = serde_json::json!({
+            "sources": [
+                {
+                    "content": "Result snippet.",
+                    "metadata": { "title": "Result", "url": "https://example.com/r" }
+                }
+            ]
+        });
+        let result = tool.parse_vane_results(&json, "test").unwrap();
+        assert!(!result.contains("Vane's synthesis:"));
+        assert!(result.contains("Sources:"));
+        assert!(result.contains("1. Result"));
+    }
+
+    #[test]
+    fn test_parse_vane_results_empty() {
+        let tool = WebSearchTool::new("vane".to_string(), None, 5, 15);
+        let json = serde_json::json!({ "message": "", "sources": [] });
+        let result = tool.parse_vane_results(&json, "test").unwrap();
+        assert!(result.contains("No results found for: test"));
+    }
+
+    #[test]
+    fn test_parse_vane_results_missing_fields_treated_as_empty() {
+        let tool = WebSearchTool::new("vane".to_string(), None, 5, 15);
+        // Defensive: response missing both `message` and `sources`
+        // (e.g. an unexpected shape) should not crash; resolves to
+        // "no results" so the assistant can keep responding.
+        let json = serde_json::json!({});
+        let result = tool.parse_vane_results(&json, "test").unwrap();
+        assert!(result.contains("No results found"));
+    }
+
+    #[test]
+    fn test_parse_vane_results_truncates_long_content() {
+        let tool = WebSearchTool::new("vane".to_string(), None, 5, 15);
+        let long_content = "x".repeat(800);
+        let json = serde_json::json!({
+            "message": "synth",
+            "sources": [{
+                "content": long_content,
+                "metadata": { "title": "T", "url": "https://e.com" }
+            }]
+        });
+        let result = tool.parse_vane_results(&json, "test").unwrap();
+        // 400-char cap + " ..." suffix; original 800 chars never appears verbatim
+        assert!(result.contains("..."));
+        assert!(!result.contains(&"x".repeat(500)));
+    }
+
+    #[test]
+    fn test_parse_vane_results_clamps_to_max_results() {
+        let tool = WebSearchTool::new("vane".to_string(), None, 2, 15);
+        let json = serde_json::json!({
+            "sources": [
+                {"content": "a", "metadata": {"title": "A", "url": "https://a"}},
+                {"content": "b", "metadata": {"title": "B", "url": "https://b"}},
+                {"content": "c", "metadata": {"title": "C", "url": "https://c"}},
+            ]
+        });
+        let result = tool.parse_vane_results(&json, "test").unwrap();
+        assert!(result.contains("1. A"));
+        assert!(result.contains("2. B"));
+        assert!(!result.contains("3. C"));
+    }
+
+    #[tokio::test]
+    async fn test_search_vane_graceful_degrade_when_unreachable() {
+        // The tool must NOT bubble connect/server errors up to the
+        // caller; it must return a friendly message so the assistant
+        // can keep responding. Both connect-refused (Vane container
+        // not running) and 5xx (Vane container starting up) routes
+        // are graceful; this test exercises whichever the runtime
+        // happens to hit.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(&config_path, "[web_search]\n").unwrap();
+
+        let tool = WebSearchTool::new_with_config(
+            "vane".to_string(),
+            None,
+            None,
+            // Port 1 (reserved TCPMUX) almost always refuses
+            // connections; on rare hosts something returns 5xx.
+            // Both are graceful paths.
+            Some("http://127.0.0.1:1".to_string()),
+            5,
+            1,
+            config_path,
+            false,
+        );
+        let result = tool.execute(json!({"query": "anything"})).await;
+        assert!(result.is_ok(), "graceful path must NOT bubble errors");
+        let output = result.unwrap().output;
+        assert!(
+            output.contains("Vane")
+                && (output.contains("unavailable")
+                    || output.contains("did not respond")
+                    || output.contains("server error")),
+            "expected graceful Vane message; got: {output}"
+        );
     }
 }

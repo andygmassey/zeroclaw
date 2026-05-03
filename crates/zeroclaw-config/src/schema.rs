@@ -2978,7 +2978,9 @@ pub struct WebSearchConfig {
     /// Enable `web_search_tool` for web searches
     #[serde(default)]
     pub enabled: bool,
-    /// Search provider: "duckduckgo" (free), "brave" (requires API key), or "searxng" (self-hosted)
+    /// Search provider: "vane" (local, default for fresh installs),
+    /// "duckduckgo" (free, no key required), "brave" (requires API
+    /// key), or "searxng" (self-hosted, requires instance URL).
     #[serde(default = "default_web_search_provider")]
     pub provider: String,
     /// Brave Search API key (required if provider is "brave")
@@ -2988,6 +2990,11 @@ pub struct WebSearchConfig {
     /// SearXNG instance URL (required if provider is "searxng"), e.g. "https://searx.example.com"
     #[serde(default)]
     pub searxng_instance_url: Option<String>,
+    /// Vane base URL. The CM051 installer bundles Vane on
+    /// `127.0.0.1:3000` by default; override here only if the user
+    /// has moved it. Defaults to `http://localhost:3000`.
+    #[serde(default = "default_vane_url")]
+    pub vane_url: Option<String>,
     /// Maximum results per search (1-10)
     #[serde(default = "default_web_search_max_results")]
     pub max_results: usize,
@@ -2997,7 +3004,11 @@ pub struct WebSearchConfig {
 }
 
 fn default_web_search_provider() -> String {
-    "duckduckgo".into()
+    "vane".into()
+}
+
+fn default_vane_url() -> Option<String> {
+    Some("http://localhost:3000".to_string())
 }
 
 fn default_web_search_max_results() -> usize {
@@ -3015,6 +3026,7 @@ impl Default for WebSearchConfig {
             provider: default_web_search_provider(),
             brave_api_key: None,
             searxng_instance_url: None,
+            vane_url: default_vane_url(),
             max_results: default_web_search_max_results(),
             timeout_secs: default_web_search_timeout_secs(),
         }
