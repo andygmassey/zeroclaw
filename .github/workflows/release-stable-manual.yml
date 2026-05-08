@@ -23,7 +23,12 @@ env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  RELEASE_CARGO_FEATURES: channel-matrix,channel-lark,whatsapp-web
+  # webauthn enabled 2026-05-09 to unblock the iOS↔Hub QR pairing flow
+  # specified in SHARED_AUTH_SPEC.md §3. The runtime crate already compiles
+  # cleanly under this flag (verified locally, cargo check -p zeroclaw-gateway
+  # --features webauthn). Subsequent PRs add the /auth/pair/init and
+  # /auth/pair/register handlers that depend on this feature.
+  RELEASE_CARGO_FEATURES: channel-matrix,channel-lark,whatsapp-web,webauthn
 
 jobs:
   validate:
@@ -230,8 +235,9 @@ jobs:
             ext: tar.gz
             ndk: true
             experimental: true
-            # wa-rs crates don't compile for Android; exclude whatsapp-web
-            cargo_features: "channel-matrix,channel-lark"
+            # wa-rs crates don't compile for Android; exclude whatsapp-web.
+            # webauthn is portable so we keep it here.
+            cargo_features: "channel-matrix,channel-lark,webauthn"
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: zeroclaw.exe
