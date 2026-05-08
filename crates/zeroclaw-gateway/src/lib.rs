@@ -443,6 +443,9 @@ pub struct AppState {
     pub device_registry: Option<Arc<api_pairing::DeviceRegistry>>,
     /// Pending pairing request store
     pub pending_pairings: Option<Arc<api_pairing::PairingStore>>,
+    /// Spec'd QR pairing-token store for SHARED_AUTH_SPEC.md §3.2 + §3.3 handshake.
+    /// Always present; populated only when a QR token has been minted.
+    pub pairing_token_store: Arc<zeroclaw_config::pairing::PairingTokenStore>,
     /// Shared canvas store for Live Canvas (A2UI) system
     pub canvas_store: CanvasStore,
     /// WebAuthn state for hardware key authentication (optional, requires `webauthn` feature)
@@ -853,10 +856,8 @@ pub async fn run_gateway(
     }
 
     // ── Spec'd QR pairing-token store (SHARED_AUTH_SPEC.md §3.2 + §3.3) ──
-    // Always create the store; it's only populated when we're emitting a QR.
-    // PR 3 mints the token + emits the QR; the store is used by PR 4's
-    // /auth/pair/init + /auth/pair/register handlers (held via AppState).
-    #[allow(unused_variables)]
+    // Always create the store; populated when a QR token is minted at first run.
+    // The store is held in AppState for /auth/pair/init + /auth/pair/register.
     let pairing_token_store = Arc::new(zeroclaw_config::pairing::PairingTokenStore::new());
 
     let pfx = path_prefix.unwrap_or("");
@@ -997,6 +998,7 @@ pub async fn run_gateway(
         session_queue: Arc::new(session_queue::SessionActorQueue::new(8, 30, 600)),
         device_registry,
         pending_pairings,
+        pairing_token_store,
         path_prefix: path_prefix.unwrap_or("").to_string(),
         web_dist_dir,
         canvas_store,
@@ -1100,9 +1102,9 @@ pub async fn run_gateway(
             post(api_pairing::rotate_token),
         )
         // ── Spec'd pairing handshake (SHARED_AUTH_SPEC.md §3.3) ──
-        // PR 2: route stubs returning HTTP 501 with structured error so iOS
-        // clients hitting these on a too-old Hub get a parseable response
-        // instead of 404. Real WebAuthn + AES-KW implementation in PR 4.
+        // /auth/pair/init is fully implemented; /auth/pair/register parses
+        // input + checks the token but stubs the WebAuthn-attestation-PRF
+        // step until that lands in the next PR.
         .route("/auth/pair/init", post(api_auth_pair::handle_pair_init))
         .route(
             "/auth/pair/register",
@@ -2531,6 +2533,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -2603,6 +2606,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3001,6 +3005,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3081,6 +3086,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3173,6 +3179,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3237,6 +3244,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3306,6 +3314,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3380,6 +3389,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3451,6 +3461,7 @@ mod tests {
             )),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,

@@ -1672,6 +1672,7 @@ mod tests {
             session_queue: Arc::new(crate::session_queue::SessionActorQueue::new(8, 30, 600)),
             device_registry: None,
             pending_pairings: None,
+            pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
             path_prefix: String::new(),
             web_dist_dir: None,
             canvas_store: zeroclaw_runtime::tools::CanvasStore::new(),

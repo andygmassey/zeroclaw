@@ -8131,7 +8131,10 @@ impl Default for WebAuthnConfig {
 }
 
 fn default_webauthn_rp_id() -> String {
-    "localhost".into()
+    // SHARED_AUTH_SPEC.md §0: rp_id is the brand-neutral company domain,
+    // baked into iOS too. Operators in dev environments may override via
+    // [security.webauthn] rp_id = "localhost".
+    "creativemachines.ai".into()
 }
 
 fn default_webauthn_rp_origin() -> String {

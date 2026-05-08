@@ -35,6 +35,8 @@ pub mod landlock;
 pub mod leak_detector;
 pub mod nevis;
 pub mod otp;
+#[cfg(feature = "webauthn")]
+pub mod pair_handshake;
 pub mod pairing;
 pub mod playbook;
 pub mod policy;
