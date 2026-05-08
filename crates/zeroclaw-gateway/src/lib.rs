@@ -8,6 +8,7 @@
 //! - Header sanitization (handled by axum/hyper)
 
 pub mod api;
+pub mod api_auth_pair;
 pub mod api_pairing;
 #[cfg(feature = "plugins-wasm")]
 pub mod api_plugins;
@@ -1004,6 +1005,15 @@ pub async fn run_gateway(
         .route(
             "/api/devices/{id}/token/rotate",
             post(api_pairing::rotate_token),
+        )
+        // ── Spec'd pairing handshake (SHARED_AUTH_SPEC.md §3.3) ──
+        // PR 2: route stubs returning HTTP 501 with structured error so iOS
+        // clients hitting these on a too-old Hub get a parseable response
+        // instead of 404. Real WebAuthn + AES-KW implementation in PR 4.
+        .route("/auth/pair/init", post(api_auth_pair::handle_pair_init))
+        .route(
+            "/auth/pair/register",
+            post(api_auth_pair::handle_pair_register),
         )
         // ── Live Canvas (A2UI) routes ──
         .route("/api/canvas", get(canvas::handle_canvas_list))
