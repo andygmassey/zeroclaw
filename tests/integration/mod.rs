@@ -1,5 +1,6 @@
 mod agent;
 mod agent_robustness;
+mod auth_pair_handshake;
 mod backup_cron_scheduling;
 mod channel_matrix;
 mod channel_routing;

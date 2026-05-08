@@ -190,6 +190,16 @@ jobs:
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+      # ── SHARED_AUTH_SPEC.md pairing handshake integration test ──
+      # Runs the auth_pair_handshake test under the webauthn feature so the
+      # cross-platform crypto + protocol shape is covered in CI. This is the
+      # missing test that allowed the iOS↔Hub protocol divergence to persist
+      # 16 days unnoticed (see /tmp/QR_PAIRING_AUDIT_2026-05-09.md).
+      - name: Run pairing handshake integration test (webauthn)
+        run: cargo nextest run --locked --features webauthn auth_pair_handshake
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: clang
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
 
   # ── Stage 4: Security (parallel with test, gated on lint) ────────────────
 
