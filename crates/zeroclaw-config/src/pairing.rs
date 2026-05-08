@@ -1,18 +1,28 @@
 // Gateway pairing mode — first-connect authentication.
 //
-// On startup the gateway generates a one-time pairing code printed to the
-// terminal. The first client must present this code via `X-Pairing-Code`
-// header on a `POST /pair` request. The server responds with a bearer token
-// that must be sent on all subsequent requests via `Authorization: Bearer <token>`.
+// Two flows coexist:
 //
-// Already-paired tokens are persisted in config so restarts don't require
-// re-pairing.
+// 1. Legacy 6-digit code (`POST /pair` with `X-Pairing-Code` header). Used by
+//    the web dashboard and existing customers paired before the spec'd flow.
+//    Returns a plaintext bearer token (`zc_<64hex>`).
+//
+// 2. Spec'd QR-pairing flow (SHARED_AUTH_SPEC.md §3.2 + §3.3). On first run the
+//    Hub mints a 32-byte base64url `pairing_token` with 10-minute TTL and
+//    embeds it in a JSON QR payload. The iOS Companion scans it, then completes
+//    the WebAuthn + AES-KW handshake at `POST /auth/pair/init` +
+//    `POST /auth/pair/register`. Returns a wrapped DEK (40 B AES-KW) instead
+//    of a bearer token; long-lived auth uses the WebAuthn assertion.
+//
+// Already-paired bearer tokens (legacy) are persisted in config so restarts
+// don't require re-pairing.
 
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// Maximum failed pairing attempts before lockout.
 const MAX_PAIR_ATTEMPTS: u32 = 5;
@@ -355,6 +365,213 @@ pub fn is_public_bind(host: &str) -> bool {
         host,
         "127.0.0.1" | "localhost" | "::1" | "[::1]" | "0:0:0:0:0:0:0:1"
     )
+}
+
+// ── Spec'd QR pairing-token store (SHARED_AUTH_SPEC.md §3.2 + §3.3) ──────────
+//
+// 32 cryptographically-random bytes encoded as base64url-unpadded. Each token
+// has a fixed expiry (default 10 minutes from generation) and is single-use:
+// once consumed by `POST /auth/pair/register`, further use returns 410 Gone.
+//
+// Storage is in-memory (no persistence): tokens that aren't consumed within
+// their TTL are forgotten on restart. This matches the spec's
+// "abandoned pairings expire and are reaped" semantic.
+
+/// Default lifetime for a fresh QR pairing token.
+pub const QR_PAIRING_TOKEN_TTL_SECS: u64 = 600; // 10 minutes (SHARED_AUTH_SPEC.md §3.2)
+
+/// Maximum concurrent outstanding QR pairing tokens (capacity bound).
+pub const MAX_OUTSTANDING_QR_TOKENS: usize = 32;
+
+/// Length in bytes of the random pairing token (before base64url encoding).
+pub const QR_PAIRING_TOKEN_BYTES: usize = 32; // SHARED_AUTH_SPEC.md §3.2
+
+/// Internal state for a single outstanding QR pairing token.
+#[derive(Debug, Clone)]
+struct QrTokenState {
+    /// UNIX seconds when this token expires.
+    expires_at: u64,
+    /// `Pending`: in `POST /auth/pair/init` (claimed but not yet completed).
+    /// Tokens flip to `Pending` on init and are removed entirely on register success.
+    claimed: bool,
+}
+
+/// In-memory store of outstanding QR pairing tokens (SHARED_AUTH_SPEC.md §3.3.4).
+///
+/// Tokens are minted with `mint()`, validated by `claim()` (used in step A), and
+/// consumed by `consume()` (used in step C). Expired or unknown tokens are
+/// rejected. Single-use: a token consumed once returns `TokenStatus::Consumed`
+/// on subsequent attempts.
+#[derive(Debug, Clone)]
+pub struct PairingTokenStore {
+    inner: Arc<Mutex<HashMap<String, QrTokenState>>>,
+}
+
+/// Outcome of looking up a pairing token in the store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenStatus {
+    /// Token is known, unexpired, and unconsumed.
+    Valid,
+    /// Token is unknown (never minted, or already consumed and reaped).
+    NotFound,
+    /// Token was minted but its TTL has elapsed.
+    Expired,
+    /// Token has already been consumed by a successful `register` call.
+    Consumed,
+}
+
+impl Default for PairingTokenStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PairingTokenStore {
+    /// Create a new empty token store.
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Mint a fresh 32-byte token, return its base64url-unpadded string form.
+    /// The token is registered as `Valid` for `QR_PAIRING_TOKEN_TTL_SECS`.
+    pub fn mint(&self) -> (String, u64) {
+        self.mint_with_ttl(QR_PAIRING_TOKEN_TTL_SECS)
+    }
+
+    /// Mint a fresh token with a custom TTL (for tests + capability extensions).
+    pub fn mint_with_ttl(&self, ttl_secs: u64) -> (String, u64) {
+        let raw: [u8; QR_PAIRING_TOKEN_BYTES] = rand::random();
+        let token = URL_SAFE_NO_PAD.encode(raw);
+        let now = unix_now_secs();
+        let expires_at = now.saturating_add(ttl_secs);
+
+        let mut map = self.inner.lock();
+
+        // Bound capacity: prune expired first, then evict oldest by expiry if still over.
+        prune_expired(&mut map, now);
+        if map.len() >= MAX_OUTSTANDING_QR_TOKENS
+            && let Some(oldest_key) = map
+                .iter()
+                .min_by_key(|(_, s)| s.expires_at)
+                .map(|(k, _)| k.clone())
+        {
+            map.remove(&oldest_key);
+        }
+
+        map.insert(
+            token.clone(),
+            QrTokenState {
+                expires_at,
+                claimed: false,
+            },
+        );
+
+        (token, expires_at)
+    }
+
+    /// Look up a token's status without changing it.
+    pub fn status(&self, token: &str) -> TokenStatus {
+        let now = unix_now_secs();
+        let map = self.inner.lock();
+        match map.get(token) {
+            None => TokenStatus::NotFound,
+            Some(state) if state.expires_at <= now => TokenStatus::Expired,
+            Some(_) => TokenStatus::Valid,
+        }
+    }
+
+    /// Mark a token as `Pending` (called by `POST /auth/pair/init`).
+    /// Returns `Ok(())` on success, otherwise the failure status.
+    pub fn claim(&self, token: &str) -> Result<(), TokenStatus> {
+        let now = unix_now_secs();
+        let mut map = self.inner.lock();
+        match map.get_mut(token) {
+            None => Err(TokenStatus::NotFound),
+            Some(state) if state.expires_at <= now => {
+                map.remove(token);
+                Err(TokenStatus::Expired)
+            }
+            Some(state) => {
+                state.claimed = true;
+                Ok(())
+            }
+        }
+    }
+
+    /// Consume a token (called by `POST /auth/pair/register` on success).
+    /// Removes it from the store entirely. Returns `Ok(())` on success.
+    pub fn consume(&self, token: &str) -> Result<(), TokenStatus> {
+        let now = unix_now_secs();
+        let mut map = self.inner.lock();
+        match map.remove(token) {
+            None => Err(TokenStatus::NotFound),
+            Some(state) if state.expires_at <= now => Err(TokenStatus::Expired),
+            Some(_) => Ok(()),
+        }
+    }
+
+    /// Number of outstanding tokens (for diagnostics).
+    pub fn len(&self) -> usize {
+        let now = unix_now_secs();
+        let mut map = self.inner.lock();
+        prune_expired(&mut map, now);
+        map.len()
+    }
+
+    /// Whether the store is currently empty (after sweep).
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// QR JSON payload (SHARED_AUTH_SPEC.md §3.2).
+///
+/// Encoded as compact UTF-8 JSON inside the QR. The `rp_id` is fixed by spec at
+/// `creativemachines.ai`; the `pairing_token` is base64url-unpadded; `expires_at`
+/// is UNIX seconds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingQrPayload {
+    pub v: u8,
+    pub hub_addr: String,
+    pub rp_id: String,
+    pub pairing_token: String,
+    pub expires_at: u64,
+}
+
+impl PairingQrPayload {
+    /// QR payload version per SHARED_AUTH_SPEC.md §3.2.
+    pub const VERSION: u8 = 1;
+    /// Spec-mandated rp_id (do not parameterise on product name).
+    pub const RP_ID: &'static str = "creativemachines.ai";
+
+    /// Construct a v1 payload for a freshly-minted token.
+    pub fn new_v1(hub_addr: impl Into<String>, pairing_token: String, expires_at: u64) -> Self {
+        Self {
+            v: Self::VERSION,
+            hub_addr: hub_addr.into(),
+            rp_id: Self::RP_ID.into(),
+            pairing_token,
+            expires_at,
+        }
+    }
+
+    /// Serialise to compact JSON (suitable for embedding in a QR module).
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("PairingQrPayload always serialisable")
+    }
+}
+
+fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn prune_expired(map: &mut HashMap<String, QrTokenState>, now: u64) {
+    map.retain(|_, state| state.expires_at > now);
 }
 
 #[cfg(test)]
@@ -749,5 +966,109 @@ mod tests {
             result.is_ok(),
             "Legitimate client should not be locked out by attacker"
         );
+    }
+
+    // ── PairingTokenStore (SHARED_AUTH_SPEC.md §3.2 + §3.3) ──────────────────
+
+    #[test]
+    async fn qr_token_minted_is_valid() {
+        let store = PairingTokenStore::new();
+        let (token, _exp) = store.mint();
+        // base64url of 32 bytes is 43 chars unpadded (32 * 4 / 3 rounded up - padding).
+        assert_eq!(token.len(), 43, "token should be 43 base64url chars");
+        assert_eq!(store.status(&token), TokenStatus::Valid);
+    }
+
+    #[test]
+    async fn qr_token_unknown_is_not_found() {
+        let store = PairingTokenStore::new();
+        assert_eq!(store.status("definitely-not-a-token"), TokenStatus::NotFound);
+        assert_eq!(
+            store.consume("definitely-not-a-token"),
+            Err(TokenStatus::NotFound)
+        );
+    }
+
+    #[test]
+    async fn qr_token_consume_is_single_use() {
+        let store = PairingTokenStore::new();
+        let (token, _) = store.mint();
+        assert!(store.consume(&token).is_ok());
+        assert_eq!(store.consume(&token), Err(TokenStatus::NotFound));
+    }
+
+    #[test]
+    async fn qr_token_expired_is_rejected() {
+        let store = PairingTokenStore::new();
+        let (token, _) = store.mint_with_ttl(0); // already expired
+        // Sleep a tick so wall-clock advances past expiry.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert_eq!(store.status(&token), TokenStatus::Expired);
+        assert_eq!(store.consume(&token), Err(TokenStatus::Expired));
+    }
+
+    #[test]
+    async fn qr_token_claim_then_consume() {
+        let store = PairingTokenStore::new();
+        let (token, _) = store.mint();
+        assert!(store.claim(&token).is_ok());
+        // Claiming twice is allowed (init can be retried in v1).
+        assert!(store.claim(&token).is_ok());
+        assert!(store.consume(&token).is_ok());
+    }
+
+    #[test]
+    async fn qr_token_capacity_bounded() {
+        let store = PairingTokenStore::new();
+        // Mint more than the cap; len() should never exceed it.
+        for _ in 0..(MAX_OUTSTANDING_QR_TOKENS + 5) {
+            let _ = store.mint();
+        }
+        assert!(
+            store.len() <= MAX_OUTSTANDING_QR_TOKENS,
+            "store size should stay within bound, got {}",
+            store.len()
+        );
+    }
+
+    #[test]
+    async fn qr_tokens_are_unique() {
+        let store = PairingTokenStore::new();
+        let (a, _) = store.mint();
+        let (b, _) = store.mint();
+        assert_ne!(a, b);
+    }
+
+    // ── PairingQrPayload ─────────────────────────────────────────────────
+
+    #[test]
+    async fn qr_payload_uses_spec_constants() {
+        let p = PairingQrPayload::new_v1("100.64.0.1:42617", "tok".into(), 1_700_000_000);
+        assert_eq!(p.v, 1);
+        assert_eq!(p.rp_id, "creativemachines.ai");
+    }
+
+    #[test]
+    async fn qr_payload_serialises_compact() {
+        let p = PairingQrPayload::new_v1("h:1", "t".into(), 1);
+        let s = p.to_json();
+        // Field order in serde is struct-declaration order; checks the spec'd shape.
+        assert!(s.contains("\"v\":1"));
+        assert!(s.contains("\"hub_addr\":\"h:1\""));
+        assert!(s.contains("\"rp_id\":\"creativemachines.ai\""));
+        assert!(s.contains("\"pairing_token\":\"t\""));
+        assert!(s.contains("\"expires_at\":1"));
+    }
+
+    #[test]
+    async fn qr_payload_round_trip() {
+        let p = PairingQrPayload::new_v1("h:1", "tok".into(), 42);
+        let s = p.to_json();
+        let back: PairingQrPayload = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.v, 1);
+        assert_eq!(back.rp_id, "creativemachines.ai");
+        assert_eq!(back.hub_addr, "h:1");
+        assert_eq!(back.pairing_token, "tok");
+        assert_eq!(back.expires_at, 42);
     }
 }

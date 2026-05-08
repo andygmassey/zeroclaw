@@ -327,6 +327,68 @@ fn normalize_max_keys(configured: usize, fallback: usize) -> usize {
     }
 }
 
+/// Resolve the `host:port` to embed in the QR JSON payload.
+///
+/// SHARED_AUTH_SPEC.md §3.2 requires `hub_addr` to be a Tailscale IP, LAN IP,
+/// or `.local.` mDNS name. Public-Internet IPs are not permitted for the
+/// pairing exchange.
+///
+/// Resolution order:
+/// 1. If the bind host is a non-loopback address (already a routable IP), use it as-is.
+/// 2. Otherwise, attempt to discover a LAN-routable IPv4 by enumerating
+///    interfaces. We pick the first non-loopback IPv4 (works for both home LAN
+///    and Tailscale; on Tailscale-active machines `100.x.x.x` typically wins).
+/// 3. If discovery fails, fall back to whatever the operator configured. iOS
+///    will reject loopback so this surfaces a clear configuration error.
+fn qr_hub_addr(bind_host: &str, port: u16) -> String {
+    if !is_loopback_or_unspecified(bind_host) {
+        return format!("{bind_host}:{port}");
+    }
+
+    if let Some(lan_ip) = discover_lan_ipv4() {
+        return format!("{lan_ip}:{port}");
+    }
+
+    format!("{bind_host}:{port}")
+}
+
+fn is_loopback_or_unspecified(host: &str) -> bool {
+    matches!(
+        host,
+        "127.0.0.1" | "localhost" | "::1" | "[::1]" | "0.0.0.0" | "::" | ""
+    )
+}
+
+/// Best-effort LAN IPv4 discovery using a UDP "connect" trick.
+///
+/// We don't send any packets — `connect` on a UDP socket only fixes the
+/// kernel's choice of source IP, which we read back via `local_addr()`.
+/// This avoids any heavy interface-enumeration dep and works the same on
+/// macOS / Linux / Windows / Android.
+fn discover_lan_ipv4() -> Option<std::net::IpAddr> {
+    // `8.8.8.8` is unreachable from many test environments but `connect` does
+    // not require reachability — only routability of the address family.
+    use std::net::UdpSocket;
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:53").ok()?;
+    let local = socket.local_addr().ok()?.ip();
+    if local.is_loopback() || local.is_unspecified() {
+        return None;
+    }
+    Some(local)
+}
+
+/// Persist the QR JSON payload to a file in the workspace directory so
+/// non-terminal flows (web dashboard, scripts, debugging) can pick it up.
+/// Best-effort: failures are logged but never block startup.
+fn write_qr_payload_file(workspace_dir: &std::path::Path, qr_json: &str) {
+    let path = workspace_dir.join("pair-payload.json");
+    match std::fs::write(&path, qr_json) {
+        Ok(()) => tracing::info!("Wrote QR pairing payload to {}", path.display()),
+        Err(e) => tracing::warn!("Failed to write {}: {}", path.display(), e),
+    }
+}
+
 /// Shared state for all axum handlers
 #[derive(Clone)]
 pub struct AppState {
@@ -790,6 +852,13 @@ pub async fn run_gateway(
         );
     }
 
+    // ── Spec'd QR pairing-token store (SHARED_AUTH_SPEC.md §3.2 + §3.3) ──
+    // Always create the store; it's only populated when we're emitting a QR.
+    // PR 3 mints the token + emits the QR; the store is used by PR 4's
+    // /auth/pair/init + /auth/pair/register handlers (held via AppState).
+    #[allow(unused_variables)]
+    let pairing_token_store = Arc::new(zeroclaw_config::pairing::PairingTokenStore::new());
+
     let pfx = path_prefix.unwrap_or("");
     println!("🦀 ZeroClaw Gateway listening on http://{display_addr}{pfx}");
     if let Some(ref url) = tunnel_url {
@@ -797,8 +866,29 @@ pub async fn run_gateway(
     }
     println!("  🌐 Web Dashboard: http://{display_addr}{pfx}/");
     if let Some(code) = pairing.pairing_code() {
+        // Mint a spec'd 32-byte QR token for the iOS handshake (§3.2).
+        // The 6-digit code (legacy) and the QR token coexist: web dashboard +
+        // existing customers use the code, iOS app uses the QR JSON payload.
+        let (qr_token, qr_expires_at) = pairing_token_store.mint();
+        let qr_addr_for_payload = qr_hub_addr(host, actual_port);
+        let qr_payload = zeroclaw_config::pairing::PairingQrPayload::new_v1(
+            qr_addr_for_payload,
+            qr_token.clone(),
+            qr_expires_at,
+        );
+        let qr_json = qr_payload.to_json();
+
+        // Persist a fallback copy on disk for operators / non-terminal flows.
+        write_qr_payload_file(&config.workspace_dir, &qr_json);
+
         println!();
-        println!("  🔐 PAIRING REQUIRED — use this one-time code:");
+        println!("  🔐 PAIRING REQUIRED");
+        println!();
+        println!("  ── For the iOS Companion app (scan this QR) ──");
+        println!("  {qr_json}");
+        println!("  (saved to: {}/pair-payload.json)", config.workspace_dir.display());
+        println!();
+        println!("  ── Legacy 6-digit code (web dashboard / existing CLI) ──");
         println!("     ┌──────────────┐");
         println!("     │  {code}  │");
         println!("     └──────────────┘");
