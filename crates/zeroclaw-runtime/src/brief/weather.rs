@@ -234,10 +234,10 @@ pub async fn fetch_weather(
     {
         let mut guard = CACHE.lock().expect("brief weather cache poisoned");
         let map = guard.get_or_insert_with(HashMap::new);
-        if let Some(entry) = map.get(&bucket) {
-            if now.signed_duration_since(entry.cached_at) < CACHE_TTL {
-                return Ok(entry.snapshot.clone());
-            }
+        if let Some(entry) = map.get(&bucket)
+            && now.signed_duration_since(entry.cached_at) < CACHE_TTL
+        {
+            return Ok(entry.snapshot.clone());
         }
     }
 
