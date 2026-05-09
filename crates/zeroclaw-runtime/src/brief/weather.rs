@@ -344,9 +344,7 @@ pub fn render_thin_brief(reasons: &[ThinReason], weather: Option<&WeatherSnapsho
             WeatherCategory::PartlyCloudy => {
                 " It's a mild, partly cloudy sort of day. Easy weather for a walk if you fancy one."
             }
-            WeatherCategory::Fog => {
-                " It's foggy. A quiet morning for a slow start indoors."
-            }
+            WeatherCategory::Fog => " It's foggy. A quiet morning for a slow start indoors.",
             WeatherCategory::Rain | WeatherCategory::Showers => {
                 " It's properly raining. A good morning to settle in with whatever you've been meaning to read."
             }
@@ -407,7 +405,10 @@ mod tests {
     fn cache_bucket_groups_nearby_coordinates() {
         // 0.001 degree = ~111 metres; bucket should treat
         // 51.5074 + 51.5075 the same.
-        assert_eq!(cache_bucket(51.5074, -0.1278), cache_bucket(51.5075, -0.1278));
+        assert_eq!(
+            cache_bucket(51.5074, -0.1278),
+            cache_bucket(51.5075, -0.1278)
+        );
         // 0.05 degrees apart => different bucket.
         assert_ne!(cache_bucket(51.50, 0.0), cache_bucket(51.55, 0.0));
     }

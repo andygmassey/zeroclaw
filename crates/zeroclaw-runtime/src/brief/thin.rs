@@ -215,7 +215,10 @@ mod tests {
         };
         let (thin, reasons) = is_thin(&signals);
         assert!(!thin, "Active customer should not be classified thin");
-        assert!(reasons.is_empty(), "no thin reasons should fire: {reasons:?}");
+        assert!(
+            reasons.is_empty(),
+            "no thin reasons should fire: {reasons:?}"
+        );
     }
 
     #[test]

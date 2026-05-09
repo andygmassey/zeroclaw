@@ -52,8 +52,8 @@
 pub mod thin;
 pub mod weather;
 
-pub use thin::{is_thin, ThinReason, ThinnessSignals};
+pub use thin::{ThinReason, ThinnessSignals, is_thin};
 pub use weather::{
-    classify_weather_code, render_thin_brief, resolve_location, ResolvedLocation,
-    WeatherCategory, WeatherSnapshot,
+    ResolvedLocation, WeatherCategory, WeatherSnapshot, classify_weather_code, render_thin_brief,
+    resolve_location,
 };
