@@ -369,6 +369,20 @@ allowed_rooms = ["!existing:matrix.org"]
         if exp.is_secret || exp.display_value == "<unset>" {
             continue;
         }
+        // Skip props whose default is computed from `now()` — the two
+        // sides of this test build their `Config`s microseconds apart,
+        // so the timestamps will never match exactly. Their *presence*
+        // is still asserted via the `find(...).unwrap_or_else(panic!)`
+        // below, which is what this exhaustive walk is for.
+        if exp.name == "subscription.last-validated-at"
+            || exp.name == "subscription.grace-period-end"
+        {
+            let _found = v0_props
+                .iter()
+                .find(|p| p.name == exp.name)
+                .unwrap_or_else(|| panic!("prop {} missing after migration", exp.name));
+            continue;
+        }
         let found = v0_props
             .iter()
             .find(|p| p.name == exp.name)

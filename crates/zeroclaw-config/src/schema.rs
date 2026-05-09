@@ -452,6 +452,16 @@ pub struct Config {
     #[serde(default)]
     #[nested]
     pub shell_tool: ShellToolConfig,
+
+    /// Subscription gate state (`[subscription]`).
+    ///
+    /// Tracks the new-data-gate v1.0 subscription state on this Hub.
+    /// Companion (iOS) validates StoreKit 2 receipts and POSTs derived
+    /// state to `/api/v1/subscription/sync`; the Hub never validates
+    /// Apple receipts directly. See `SUBSCRIPTION_GATE_ARCH_2026-05-09.md`.
+    #[serde(default)]
+    #[nested]
+    pub subscription: SubscriptionConfig,
 }
 
 /// Multi-client workspace isolation configuration.
@@ -2964,6 +2974,104 @@ impl Default for ShellToolConfig {
     fn default() -> Self {
         Self {
             timeout_secs: default_shell_tool_timeout_secs(),
+        }
+    }
+}
+
+// ── Subscription gate (new-data-gate v1.0) ───────────────────────
+
+/// Subscription status, as derived by the iOS Companion from StoreKit 2
+/// and synced to the Hub. The Hub itself never validates Apple receipts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SubscriptionStatus {
+    /// Active paid subscription confirmed by Companion within the last sync.
+    Active,
+    /// Grace period — fresh install (+30d) or post-lapse soft landing (+14d).
+    /// Default for fresh installs (paired with the install-time
+    /// `grace_period_end` set in `SubscriptionConfig::default`).
+    #[default]
+    Grace,
+    /// Subscription has lapsed and grace has elapsed.
+    Expired,
+    /// No subscription has ever been observed (or operator forced inactive).
+    Inactive,
+}
+
+/// Where the cached subscription state came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SubscriptionSource {
+    /// State pushed by the iOS Companion via `/api/v1/subscription/sync`.
+    Companion,
+    /// Hub-initial default (fresh install grace, never synced yet).
+    #[default]
+    HubInitial,
+    /// Operator-set via CLI/config (treated identically to Companion-source).
+    ManualOverride,
+}
+
+/// Subscription gate state (`[subscription]` section).
+///
+/// Stores Companion-derived state plus an integrity hash of the Apple
+/// receipt. The Hub never sees the raw receipt blob, the Apple ID, or any
+/// purchase-history details — only the fields below.
+#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
+#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
+#[prefix = "subscription"]
+#[serde(default)]
+pub struct SubscriptionConfig {
+    /// Current gate status. Default: `grace` on fresh install.
+    pub status: SubscriptionStatus,
+
+    /// RFC3339 timestamp of the last Companion sync (or fresh-install boot).
+    /// Used by `state_freshness()` to compute Fresh / Stale / OfflineGrace.
+    #[serde(default = "default_subscription_now_rfc3339")]
+    pub last_validated_at: String,
+
+    /// RFC3339 expiry from the last StoreKit 2 receipt, when known.
+    /// Empty string means absent (avoids `Option<String>` macro friction).
+    #[serde(default)]
+    pub expires_at: String,
+
+    /// RFC3339 end of the current grace window (initial install +30d, or
+    /// post-lapse +14d). Empty string means absent.
+    #[serde(default = "default_subscription_initial_grace_end_rfc3339")]
+    pub grace_period_end: String,
+
+    /// Where the cached state came from.
+    pub source: SubscriptionSource,
+
+    /// Latest StoreKit 2 originalTransactionID, when known. Empty = absent.
+    #[serde(default)]
+    pub apple_transaction_id: String,
+
+    /// sha256(hex) of the Apple receipt blob — integrity tag only.
+    /// Reversible to nothing about the user. Empty = absent.
+    #[serde(default)]
+    pub apple_receipt_hash: String,
+}
+
+fn default_subscription_now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+fn default_subscription_initial_grace_end_rfc3339() -> String {
+    (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339()
+}
+
+impl Default for SubscriptionConfig {
+    fn default() -> Self {
+        Self {
+            status: SubscriptionStatus::Grace,
+            last_validated_at: default_subscription_now_rfc3339(),
+            expires_at: String::new(),
+            grace_period_end: default_subscription_initial_grace_end_rfc3339(),
+            source: SubscriptionSource::HubInitial,
+            apple_transaction_id: String::new(),
+            apple_receipt_hash: String::new(),
         }
     }
 }
@@ -9233,6 +9341,7 @@ impl Default for Config {
             opencode_cli: OpenCodeCliConfig::default(),
             sop: SopConfig::default(),
             shell_tool: ShellToolConfig::default(),
+            subscription: SubscriptionConfig::default(),
         }
     }
 }
@@ -11268,6 +11377,8 @@ impl_enum_prop_kind!(
     OtpMethod,
     SandboxBackend,
     AutonomyLevel,
+    SubscriptionStatus,
+    SubscriptionSource,
 );
 
 impl HasPropKind for serde_json::Value {
@@ -11859,6 +11970,7 @@ auto_save = true
             opencode_cli: OpenCodeCliConfig::default(),
             sop: SopConfig::default(),
             shell_tool: ShellToolConfig::default(),
+            subscription: SubscriptionConfig::default(),
         };
         // Provider fields are now resolved directly — no cache needed.
 
@@ -12428,6 +12540,7 @@ default_temperature = 0.7
             opencode_cli: OpenCodeCliConfig::default(),
             sop: SopConfig::default(),
             shell_tool: ShellToolConfig::default(),
+            subscription: SubscriptionConfig::default(),
         };
 
         // Provider fields are now resolved directly — no cache needed.
@@ -17469,5 +17582,112 @@ allowed_users = ["@u:m"]
             config.channels.matrix.as_ref().unwrap().enabled,
             "backfill should activate channel even when config has comments"
         );
+    }
+
+    // ── Subscription gate (new-data-gate v1.0) ────────────────
+
+    #[test]
+    async fn subscription_default_is_grace_hub_initial_with_30d_window() {
+        let cfg = SubscriptionConfig::default();
+        assert_eq!(cfg.status, SubscriptionStatus::Grace);
+        assert_eq!(cfg.source, SubscriptionSource::HubInitial);
+        assert!(cfg.expires_at.is_empty());
+        assert!(cfg.apple_transaction_id.is_empty());
+        assert!(cfg.apple_receipt_hash.is_empty());
+
+        let now = chrono::DateTime::parse_from_rfc3339(&cfg.last_validated_at)
+            .expect("last_validated_at is RFC3339")
+            .with_timezone(&chrono::Utc);
+        let grace_end = chrono::DateTime::parse_from_rfc3339(&cfg.grace_period_end)
+            .expect("grace_period_end is RFC3339")
+            .with_timezone(&chrono::Utc);
+        let delta = grace_end - now;
+        assert!(
+            delta >= chrono::Duration::days(29) && delta <= chrono::Duration::days(31),
+            "fresh-install grace window should be ~30d, got {}d",
+            delta.num_days()
+        );
+    }
+
+    #[test]
+    async fn subscription_serde_round_trip_active() {
+        let cfg = SubscriptionConfig {
+            status: SubscriptionStatus::Active,
+            last_validated_at: "2026-05-09T12:00:00+00:00".to_string(),
+            expires_at: "2026-06-09T12:00:00+00:00".to_string(),
+            grace_period_end: String::new(),
+            source: SubscriptionSource::Companion,
+            apple_transaction_id: "2000000123456789".to_string(),
+            apple_receipt_hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+                .to_string(),
+        };
+        let toml_str = toml::to_string(&cfg).expect("serialize");
+        let back: SubscriptionConfig = toml::from_str(&toml_str).expect("deserialize");
+        assert_eq!(back.status, SubscriptionStatus::Active);
+        assert_eq!(back.source, SubscriptionSource::Companion);
+        assert_eq!(back.expires_at, "2026-06-09T12:00:00+00:00");
+        assert_eq!(back.apple_transaction_id, "2000000123456789");
+    }
+
+    #[test]
+    async fn subscription_serde_round_trip_all_status_variants() {
+        for status in [
+            SubscriptionStatus::Active,
+            SubscriptionStatus::Grace,
+            SubscriptionStatus::Expired,
+            SubscriptionStatus::Inactive,
+        ] {
+            for source in [
+                SubscriptionSource::Companion,
+                SubscriptionSource::HubInitial,
+                SubscriptionSource::ManualOverride,
+            ] {
+                let cfg = SubscriptionConfig {
+                    status,
+                    source,
+                    ..SubscriptionConfig::default()
+                };
+                let toml_str = toml::to_string(&cfg).expect("serialize");
+                let back: SubscriptionConfig = toml::from_str(&toml_str).expect("deserialize");
+                assert_eq!(back.status, status);
+                assert_eq!(back.source, source);
+            }
+        }
+    }
+
+    #[test]
+    async fn subscription_kebab_case_serialization() {
+        let cfg = SubscriptionConfig {
+            status: SubscriptionStatus::Inactive,
+            source: SubscriptionSource::ManualOverride,
+            ..SubscriptionConfig::default()
+        };
+        let toml_str = toml::to_string(&cfg).expect("serialize");
+        assert!(
+            toml_str.contains("status = \"inactive\""),
+            "expected kebab-case status, got:\n{toml_str}"
+        );
+        assert!(
+            toml_str.contains("source = \"manual-override\""),
+            "expected kebab-case source, got:\n{toml_str}"
+        );
+    }
+
+    #[test]
+    async fn subscription_section_round_trips_inside_full_config() {
+        let toml_str = r#"
+[subscription]
+status = "active"
+last_validated_at = "2026-05-09T12:00:00+00:00"
+expires_at = "2026-06-09T12:00:00+00:00"
+grace_period_end = ""
+source = "companion"
+apple_transaction_id = "2000000123456789"
+apple_receipt_hash = "abc123"
+"#;
+        let config: Config = toml::from_str(toml_str).expect("parse");
+        assert_eq!(config.subscription.status, SubscriptionStatus::Active);
+        assert_eq!(config.subscription.source, SubscriptionSource::Companion);
+        assert_eq!(config.subscription.expires_at, "2026-06-09T12:00:00+00:00");
     }
 }

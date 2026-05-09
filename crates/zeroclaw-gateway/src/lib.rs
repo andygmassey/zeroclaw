@@ -11,6 +11,7 @@ pub mod api;
 pub mod api_pairing;
 #[cfg(feature = "plugins-wasm")]
 pub mod api_plugins;
+pub mod api_subscription;
 #[cfg(feature = "webauthn")]
 pub mod api_webauthn;
 pub mod auth_rate_limit;
@@ -1015,6 +1016,11 @@ pub async fn run_gateway(
         .route(
             "/api/canvas/{id}/history",
             get(canvas::handle_canvas_history),
+        )
+        // ── Subscription gate sync (new-data-gate v1.0) ──
+        .route(
+            "/api/v1/subscription/sync",
+            post(api_subscription::handle_subscription_sync),
         );
 
     // ── WebAuthn hardware key authentication API (requires webauthn feature) ──
