@@ -10,9 +10,12 @@
 //! * [`state_freshness`] — Doctor-banner staleness verdict (Fresh / Stale /
 //!   `OfflineGrace` / Inactive).
 //! * [`parse_rfc3339`] — small parsing helper used by both predicates.
+//! * [`gate`] — Phase 1b gate wrapper used at channel ingestion call sites.
 //!
 //! The cached state lives in
 //! [`zeroclaw_config::schema::SubscriptionConfig`].
+
+pub mod gate;
 
 use chrono::{DateTime, Duration, Utc};
 use zeroclaw_config::schema::{SubscriptionConfig, SubscriptionStatus};
