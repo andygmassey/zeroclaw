@@ -86,7 +86,10 @@ impl MockCompanion {
             .decode(&parsed.pairing_token)
             .map_err(|e| format!("token decode failed: {e}"))?;
         if decoded.len() != 32 {
-            return Err(format!("token decoded to {} bytes, expected 32", decoded.len()));
+            return Err(format!(
+                "token decoded to {} bytes, expected 32",
+                decoded.len()
+            ));
         }
         Ok(parsed)
     }
@@ -128,9 +131,13 @@ fn qr_payload_round_trip_through_mock_companion() {
 
 #[test]
 fn qr_payload_with_wrong_rp_id_is_rejected_by_companion() {
-    let bad_qr = r#"{"v":1,"hub_addr":"h:1","rp_id":"lifeline.dev","pairing_token":"AA","expires_at":1}"#;
+    let bad_qr =
+        r#"{"v":1,"hub_addr":"h:1","rp_id":"example.invalid","pairing_token":"AA","expires_at":1}"#;
     let result = MockCompanion::parse_qr_payload(bad_qr);
-    assert!(result.is_err(), "iOS MUST reject rp_id != creativemachines.ai");
+    assert!(
+        result.is_err(),
+        "iOS MUST reject rp_id != creativemachines.ai"
+    );
 }
 
 #[test]
