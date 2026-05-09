@@ -110,8 +110,7 @@ pub async fn handle_subscription_sync(
     config.subscription.expires_at = expires_at;
     config.subscription.grace_period_end = new_grace_end;
     config.subscription.source = SubscriptionSource::Companion;
-    config.subscription.apple_transaction_id =
-        body.apple_transaction_id.unwrap_or_default();
+    config.subscription.apple_transaction_id = body.apple_transaction_id.unwrap_or_default();
     config.subscription.apple_receipt_hash = body.apple_receipt_hash.unwrap_or_default();
 
     // Persist atomically (existing Config::save() handles temp-file +
@@ -170,7 +169,10 @@ mod tests {
         let req: SubscriptionSyncRequest = serde_json::from_str(body).unwrap();
         assert_eq!(req.status, SubscriptionStatus::Active);
         assert_eq!(req.expires_at.as_deref(), Some("2026-06-09T12:00:00+00:00"));
-        assert_eq!(req.apple_transaction_id.as_deref(), Some("2000000123456789"));
+        assert_eq!(
+            req.apple_transaction_id.as_deref(),
+            Some("2000000123456789")
+        );
         assert_eq!(req.apple_receipt_hash.as_deref(), Some("abc123"));
     }
 

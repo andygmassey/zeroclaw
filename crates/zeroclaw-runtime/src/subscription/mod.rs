@@ -148,11 +148,7 @@ mod tests {
     #[test]
     fn active_passes_even_when_last_validated_is_ancient() {
         let now = fixed_now();
-        let s = state(
-            SubscriptionStatus::Active,
-            now - Duration::days(365),
-            None,
-        );
+        let s = state(SubscriptionStatus::Active, now - Duration::days(365), None);
         assert!(is_active_or_grace(&s, now));
     }
 
@@ -188,22 +184,14 @@ mod tests {
     #[test]
     fn expired_within_14d_passes() {
         let now = fixed_now();
-        let s = state(
-            SubscriptionStatus::Expired,
-            now - Duration::days(13),
-            None,
-        );
+        let s = state(SubscriptionStatus::Expired, now - Duration::days(13), None);
         assert!(is_active_or_grace(&s, now));
     }
 
     #[test]
     fn expired_at_14d_boundary_blocks() {
         let now = fixed_now();
-        let s = state(
-            SubscriptionStatus::Expired,
-            now - Duration::days(14),
-            None,
-        );
+        let s = state(SubscriptionStatus::Expired, now - Duration::days(14), None);
         // 14d post-lapse grace is `< 14d`, not `<= 14d`.
         assert!(!is_active_or_grace(&s, now));
     }
@@ -211,18 +199,18 @@ mod tests {
     #[test]
     fn expired_beyond_14d_blocks() {
         let now = fixed_now();
-        let s = state(
-            SubscriptionStatus::Expired,
-            now - Duration::days(20),
-            None,
-        );
+        let s = state(SubscriptionStatus::Expired, now - Duration::days(20), None);
         assert!(!is_active_or_grace(&s, now));
     }
 
     #[test]
     fn inactive_always_blocks() {
         let now = fixed_now();
-        let s = state(SubscriptionStatus::Inactive, now, Some(now + Duration::days(365)));
+        let s = state(
+            SubscriptionStatus::Inactive,
+            now,
+            Some(now + Duration::days(365)),
+        );
         assert!(!is_active_or_grace(&s, now));
     }
 

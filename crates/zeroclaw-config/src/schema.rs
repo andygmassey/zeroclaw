@@ -17618,9 +17618,8 @@ allowed_users = ["@u:m"]
             grace_period_end: String::new(),
             source: SubscriptionSource::Companion,
             apple_transaction_id: "2000000123456789".to_string(),
-            apple_receipt_hash:
-                "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-                    .to_string(),
+            apple_receipt_hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+                .to_string(),
         };
         let toml_str = toml::to_string(&cfg).expect("serialize");
         let back: SubscriptionConfig = toml::from_str(&toml_str).expect("deserialize");
@@ -17649,8 +17648,7 @@ allowed_users = ["@u:m"]
                     ..SubscriptionConfig::default()
                 };
                 let toml_str = toml::to_string(&cfg).expect("serialize");
-                let back: SubscriptionConfig =
-                    toml::from_str(&toml_str).expect("deserialize");
+                let back: SubscriptionConfig = toml::from_str(&toml_str).expect("deserialize");
                 assert_eq!(back.status, status);
                 assert_eq!(back.source, source);
             }
@@ -17690,9 +17688,6 @@ apple_receipt_hash = "abc123"
         let config: Config = toml::from_str(toml_str).expect("parse");
         assert_eq!(config.subscription.status, SubscriptionStatus::Active);
         assert_eq!(config.subscription.source, SubscriptionSource::Companion);
-        assert_eq!(
-            config.subscription.expires_at,
-            "2026-06-09T12:00:00+00:00"
-        );
+        assert_eq!(config.subscription.expires_at, "2026-06-09T12:00:00+00:00");
     }
 }
