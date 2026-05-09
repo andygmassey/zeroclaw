@@ -11,11 +11,7 @@
 //! Real implementation lives in PR 4: WebAuthn registration with PRF, AES-KW
 //! DEK wrapping, companion_proof / hub_proof HMAC verification.
 
-use axum::{
-    Json,
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{Json, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 
 /// Spec version — every v1 message MUST carry this in the JSON body.
