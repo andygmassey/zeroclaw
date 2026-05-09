@@ -149,8 +149,7 @@ pub fn verify_companion_proof(kek: &PrimaryKek, candidate: &[u8]) -> bool {
 /// - Default IV `A6A6A6A6A6A6A6A6` (implicit, no IV transmitted).
 /// - RFC 3394 unpadded variant only.
 pub fn wrap_dek(kek: &PrimaryKek, dek: &[u8; DEK_LEN]) -> [u8; WRAPPED_DEK_LEN] {
-    let cipher = KwAes256::new_from_slice(kek.as_bytes())
-        .expect("KwAes256 accepts 32-byte key");
+    let cipher = KwAes256::new_from_slice(kek.as_bytes()).expect("KwAes256 accepts 32-byte key");
     let mut wrapped = [0u8; WRAPPED_DEK_LEN];
     cipher
         .wrap_key(dek.as_slice(), &mut wrapped)
@@ -163,8 +162,7 @@ pub fn wrap_dek(kek: &PrimaryKek, dek: &[u8; DEK_LEN]) -> [u8; WRAPPED_DEK_LEN] 
 /// Returns `Err` on integrity-check failure (RFC 3394 default-IV mismatch),
 /// never partially-decrypted garbage. SHARED_AUTH_SPEC.md §2.2.
 pub fn unwrap_dek(kek: &PrimaryKek, wrapped: &[u8; WRAPPED_DEK_LEN]) -> Result<[u8; DEK_LEN]> {
-    let cipher = KwAes256::new_from_slice(kek.as_bytes())
-        .expect("KwAes256 accepts 32-byte key");
+    let cipher = KwAes256::new_from_slice(kek.as_bytes()).expect("KwAes256 accepts 32-byte key");
     let mut out = [0u8; DEK_LEN];
     cipher
         .unwrap_key(wrapped, &mut out)
@@ -186,7 +184,10 @@ fn validate_thread_id(s: &str) -> Result<()> {
     if s.is_empty() || s.len() > 32 {
         bail!("thread_id must be 1..=32 chars, got {}", s.len());
     }
-    if !s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+    if !s
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
         bail!("thread_id must match [a-z0-9_]+, got {s:?}");
     }
     if s != DEFAULT_THREAD_ID {
@@ -273,11 +274,10 @@ mod tests {
 
     #[test]
     fn aes_kw_matches_rfc3394_vector() {
-        let kek_bytes_hex =
-            "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F";
-        let dek_bytes_hex =
-            "00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F";
-        let expected_hex = "28C9F404C4B810F4CBCCB35CFB87F8263F5786E2D80ED326CBC7F0E71A99F43BFB988B9B7A02DD21";
+        let kek_bytes_hex = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F";
+        let dek_bytes_hex = "00112233445566778899AABBCCDDEEFF000102030405060708090A0B0C0D0E0F";
+        let expected_hex =
+            "28C9F404C4B810F4CBCCB35CFB87F8263F5786E2D80ED326CBC7F0E71A99F43BFB988B9B7A02DD21";
 
         let mut kek_bytes = [0u8; KEK_LEN];
         hex::decode_to_slice(kek_bytes_hex, &mut kek_bytes).unwrap();

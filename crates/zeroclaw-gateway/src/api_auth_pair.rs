@@ -24,12 +24,7 @@
 //! pipeline.
 
 use crate::AppState;
-use axum::{
-    Json,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use zeroclaw_config::pairing::TokenStatus;
