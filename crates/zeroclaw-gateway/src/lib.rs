@@ -886,7 +886,10 @@ pub async fn run_gateway(
         println!();
         println!("  ── For the iOS Companion app (scan this QR) ──");
         println!("  {qr_json}");
-        println!("  (saved to: {}/pair-payload.json)", config.workspace_dir.display());
+        println!(
+            "  (saved to: {}/pair-payload.json)",
+            config.workspace_dir.display()
+        );
         println!();
         println!("  ── Legacy 6-digit code (web dashboard / existing CLI) ──");
         println!("     ┌──────────────┐");

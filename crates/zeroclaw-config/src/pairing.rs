@@ -982,7 +982,10 @@ mod tests {
     #[test]
     async fn qr_token_unknown_is_not_found() {
         let store = PairingTokenStore::new();
-        assert_eq!(store.status("definitely-not-a-token"), TokenStatus::NotFound);
+        assert_eq!(
+            store.status("definitely-not-a-token"),
+            TokenStatus::NotFound
+        );
         assert_eq!(
             store.consume("definitely-not-a-token"),
             Err(TokenStatus::NotFound)
