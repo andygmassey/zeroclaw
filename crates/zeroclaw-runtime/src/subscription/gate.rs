@@ -20,7 +20,7 @@
 use chrono::{DateTime, Utc};
 use zeroclaw_config::schema::SubscriptionConfig;
 
-use super::{is_active_or_grace, state_freshness, StalenessVerdict};
+use super::{StalenessVerdict, is_active_or_grace, state_freshness};
 
 /// The reason a [`GateDecision`] resolved as it did. Surfaced into logs +
 /// the Doctor view via the channel call site.
@@ -112,9 +112,9 @@ pub fn gate_new_data_ingestion(
             SubscriptionStatus::Active => GateReason::Active,
             SubscriptionStatus::Grace => GateReason::InGrace,
             SubscriptionStatus::Expired => GateReason::PostLapseSoftLanding,
-            SubscriptionStatus::Inactive => unreachable!(
-                "is_active_or_grace returned true for Inactive — predicate invariant"
-            ),
+            SubscriptionStatus::Inactive => {
+                unreachable!("is_active_or_grace returned true for Inactive — predicate invariant")
+            }
         };
         return GateDecision::Allow {
             reason,
@@ -180,7 +180,11 @@ mod tests {
     #[test]
     fn active_with_fresh_sync_allows_no_warning() {
         let now = fixed_now();
-        let state = cfg(SubscriptionStatus::Active, now - chrono::Duration::days(1), None);
+        let state = cfg(
+            SubscriptionStatus::Active,
+            now - chrono::Duration::days(1),
+            None,
+        );
         let d = gate_new_data_ingestion("imessage", &state, now);
         assert!(d.allow());
         assert_eq!(d.reason(), GateReason::Active);
