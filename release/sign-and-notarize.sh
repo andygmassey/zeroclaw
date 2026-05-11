@@ -245,11 +245,12 @@ fi
 # verify the ticket on first run when there's no local staple.
 # The release runner has internet; the customer Mac will too.
 
-echo "[$(date '+%H:%M:%S')] sign-and-notarize: spctl Gatekeeper verdict"
-if ! spctl -a -vvv -t execute "$BINARY" 2>&1 | sed -e 's/^/    /'; then
-    echo "ERROR: spctl rejected the signed binary; notarisation must have failed silently." >&2
-    exit 1
-fi
+# Raw CLI Mach-O binaries are rejected by `spctl -t execute` with
+# "the code is valid but does not seem to be an app" even when
+# correctly notarised. Apple's contract for CLI binaries is online
+# ticket lookup at customer first-run, not local spctl assessment.
+# The notary verdict above (status=Accepted) is the source of truth.
+echo "[$(date '+%H:%M:%S')] sign-and-notarize: skipping local spctl gate (raw Mach-O; ticket verified online at runtime)"
 
 # Stapling for raw binaries
 # ------------------------
