@@ -1342,9 +1342,15 @@ impl Channel for WhatsAppWebChannel {
                                     chat.len(),
                                     content.len()
                                 );
+                                // L3 contract: never log message bodies, even at debug. The
+                                // Business-mode allowlist gate upstream of this line currently
+                                // protects body content from leaking to stdout / journald /
+                                // Console.app, but pinning the redaction at source removes the
+                                // dependency on log-ordering invariants. A future refactor that
+                                // moves the gate or this log cannot accidentally leak content.
                                 tracing::debug!(
-                                    "WhatsApp Web message content: {}",
-                                    content
+                                    "WhatsApp Web message content_len={}",
+                                    content.len()
                                 );
 
                                 if content.is_empty() {
