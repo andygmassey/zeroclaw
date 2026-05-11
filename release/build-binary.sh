@@ -52,24 +52,15 @@ fi
 
 echo "[$(date '+%H:%M:%S')] Building ostler-assistant v${VERSION} for ${TARGET}"
 
-# Check the cross-target is installed before invoking cargo so a
-# missing target produces a clear "rustup target add ..." hint
-# rather than a deep cargo error.
-if ! rustup target list --installed 2>/dev/null | grep -q "^${TARGET}$"; then
-    echo "ERROR: ${TARGET} target is not installed." >&2
-    echo "       Install with:  rustup target add ${TARGET}" >&2
-    exit 1
-fi
-
 # Build web dashboard first; the gateway feature serves these
 # assets at runtime. Stays in sync with the workflow's behaviour.
 echo "[$(date '+%H:%M:%S')] Building web dashboard"
 (cd web && npm ci --silent && npm run build --silent)
 
-echo "[$(date '+%H:%M:%S')] cargo build --release --locked --target ${TARGET}"
-cargo build --release --locked --target "$TARGET"
+echo "[$(date '+%H:%M:%S')] cargo build --release --locked (native arm64)"
+cargo build --release --locked
 
-BIN_PATH="target/${TARGET}/release/zeroclaw"
+BIN_PATH="target/release/zeroclaw"
 if [ ! -x "$BIN_PATH" ]; then
     echo "ERROR: expected built binary at $BIN_PATH" >&2
     exit 1
