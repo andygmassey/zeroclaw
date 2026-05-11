@@ -1173,6 +1173,36 @@ impl Channel for WhatsAppWebChannel {
 
                                 let is_group = info.source.is_group;
 
+                                // ── Business-mode allowlist gate (always-on) ──
+                                //
+                                // Business-mode's documented contract is "respond to
+                                // all messages passing the allowlist" (see
+                                // `WhatsAppWebMode::Business` doc comment in
+                                // zeroclaw-config schema). Historically that gate
+                                // lived only inside the Personal-mode dispatch
+                                // below, so Business-mode messages bypassed the
+                                // allowlist entirely. Closes the
+                                // `WhatsAppWebMode::default() == Business` silent
+                                // bypass: an inbound DM/group message in Business
+                                // mode from a non-allowlisted sender is now
+                                // dropped before any agent invocation, matching
+                                // the per-chat-type Allowlist policies in Personal
+                                // mode (lines below). Customers who deliberately
+                                // want unauthenticated inbound (e.g. an open
+                                // support persona) should set
+                                // `mode = "personal"` + `dm_policy = "all"` /
+                                // `group_policy = "all"` and accept the explicit
+                                // posture.
+                                if wa_mode == zeroclaw_config::schema::WhatsAppWebMode::Business
+                                    && normalized.is_none()
+                                {
+                                    tracing::warn!(
+                                        "WhatsApp Web: Business-mode message from unrecognized sender not in allowed list (candidates_count={})",
+                                        sender_candidates.len()
+                                    );
+                                    return;
+                                }
+
                                 // Phone-based reply target for self-chat.
                                 // LID JIDs (e.g. 76188559093817@lid) are internal
                                 // identifiers that cannot receive messages; replies
