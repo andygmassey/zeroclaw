@@ -2,7 +2,7 @@
 
 Recognising voices on calls
 
-Ostler can label transcripts with who is speaking – for example, "Andy", "Alison" – by storing a numeric fingerprint of each voice locally on this Mac. Under UK and EU privacy law this is biometric data, so we have to ask first.
+Ostler can label transcripts with who is speaking – for example, "Sam", "Alex" – by storing a numeric fingerprint of each voice locally on this Mac. Under UK and EU privacy law this is biometric data, so we have to ask first.
 
 What we do. Identify *who* is speaking on a recording you make.
 What we do not do. Detect mood, emotion, sentiment, stress or any other inferred psychological state from voice.
