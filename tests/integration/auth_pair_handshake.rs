@@ -256,3 +256,163 @@ fn expired_token_cannot_complete_init() {
         zeroclaw_config::pairing::TokenStatus::Expired
     );
 }
+
+// ── Step C — full round-trip ─────────────────────────────────────
+//
+// Added with the F12 / pair-register PRF-extraction fix (PR #40).
+// The earlier tests in this file exercise the crypto primitives
+// individually (KEK derive, AES-KW wrap, companion_proof, hub_proof);
+// this section composes them in the exact sequence the wire-level
+// Step C handler walks, anchored on the SHARED_AUTH_SPEC.md §3.3
+// JSON shape that CM031 now sends and the Hub now decodes.
+//
+// The test stays crypto-fixture-only (no Axum AppState) because the
+// Hub handler's HTTP-layer responsibilities (body parse, status
+// mapping, token consume, file IO) are already unit-tested in
+// `api_auth_pair::tests`. What this file adds is the cross-side
+// byte-identity check: a Companion that sends `prf_output` over the
+// wire must end up with a `wrapped_dek` it can actually unwrap and
+// a `hub_proof` it can verify -- the property that catches drift in
+// HKDF info strings, AES-KW endianness, or HMAC ordering on either
+// side before iOS pairs against the real Hub.
+
+#[test]
+fn step_c_full_round_trip_against_fixture_prf() {
+    // The Companion receives a 32-byte PRF first-output from its
+    // passkey and computes its primary KEK + companion_proof locally.
+    let companion = MockCompanion::with_fixture_prf();
+    let companion_kek = companion.derive_kek();
+    let companion_proof = compute_companion_proof(&companion_kek);
+
+    // Step C goes on the wire as a JSON body. The relevant fields
+    // for the crypto round-trip are `prf_output` (32 B b64u),
+    // `companion_proof` (32 B b64u), and the response carries
+    // `wrapped_dek` (40 B b64u) + `hub_proof` (32 B b64u). The
+    // SHARED_AUTH_SPEC.md §3.3 schema is the contract; we only
+    // model the bytes that flow through the crypto chain here.
+    let prf_on_wire_b64u = URL_SAFE_NO_PAD.encode(companion.prf_output);
+    let companion_proof_b64u = URL_SAFE_NO_PAD.encode(companion_proof);
+
+    // Hub side: decode prf_output back to raw bytes (the handler's
+    // first step after the body parse and length-checks).
+    let prf_decoded = URL_SAFE_NO_PAD
+        .decode(prf_on_wire_b64u)
+        .expect("prf_output decodes");
+    assert_eq!(
+        prf_decoded.len(),
+        32,
+        "prf_output MUST be 32 bytes (SHARED_AUTH_SPEC.md §3.3)"
+    );
+
+    // Hub re-derives the KEK from prf_output via §1.3. With the
+    // default thread_id, the result MUST be byte-identical to the
+    // Companion's KEK or every subsequent step fails.
+    let hub_kek = PrimaryKek::derive(&prf_decoded, "default")
+        .expect("Hub KEK derive must succeed");
+    assert_eq!(
+        hex::encode(hub_kek.as_bytes()),
+        hex::encode(companion_kek.as_bytes()),
+        "Hub-derived KEK MUST match the Companion-derived KEK on the same prf_output"
+    );
+
+    // Hub verifies companion_proof. A spec'd Companion produces a
+    // proof the Hub accepts; a Companion that lied about prf_output
+    // would land on the !verify branch (covered in the negative
+    // test below).
+    let proof_decoded = URL_SAFE_NO_PAD
+        .decode(companion_proof_b64u)
+        .expect("companion_proof decodes");
+    assert!(
+        verify_companion_proof(&hub_kek, &proof_decoded),
+        "Hub MUST accept the spec'd companion_proof from a peer with the same KEK"
+    );
+
+    // Hub generates (first-pair) or loads (re-pair) the sync DEK.
+    // For the round-trip we use a freshly-generated DEK.
+    let raw_dek = generate_dek();
+
+    // Hub wraps the DEK under its KEK + computes the hub_proof.
+    let wrapped_dek = wrap_dek(&hub_kek, &raw_dek);
+    let hub_proof = compute_hub_proof(&hub_kek);
+
+    // Response goes back to Companion as base64url-unpadded.
+    let wrapped_dek_b64u = URL_SAFE_NO_PAD.encode(wrapped_dek);
+    let hub_proof_b64u = URL_SAFE_NO_PAD.encode(hub_proof);
+
+    // Companion-side: decode the response + verify hub_proof BEFORE
+    // touching wrapped_dek (spec §3.3: "Companion MUST verify before
+    // storing the wrapped DEK"). The hub_proof a Companion computes
+    // locally from its own KEK MUST equal the value on the wire.
+    let hub_proof_decoded = URL_SAFE_NO_PAD
+        .decode(hub_proof_b64u)
+        .expect("hub_proof decodes");
+    let expected_hub_proof_on_companion = compute_hub_proof(&companion_kek);
+    assert_eq!(
+        hub_proof_decoded.as_slice(),
+        expected_hub_proof_on_companion.as_slice(),
+        "Companion-computed hub_proof MUST byte-match the wire hub_proof"
+    );
+
+    // Companion unwraps wrapped_dek with its own KEK. Net effect:
+    // both sides hold the same raw DEK without it crossing the wire
+    // in clear, and the Companion can persist the wrapped form in
+    // its Keychain knowing it can recover the raw DEK on demand.
+    let wrapped_dek_decoded = URL_SAFE_NO_PAD
+        .decode(wrapped_dek_b64u)
+        .expect("wrapped_dek decodes");
+    assert_eq!(
+        wrapped_dek_decoded.len(),
+        40,
+        "wrapped_dek MUST be 40 bytes (AES-KW RFC 3394 over a 32 B DEK)"
+    );
+    let unwrapped = unwrap_dek(
+        &companion_kek,
+        wrapped_dek_decoded.as_slice().try_into().unwrap(),
+    )
+    .expect("Companion-side AES-KW unwrap must succeed");
+    assert_eq!(
+        unwrapped, raw_dek,
+        "Companion-unwrapped DEK MUST byte-match the Hub-generated raw DEK"
+    );
+}
+
+#[test]
+fn step_c_tampered_prf_output_fails_companion_proof_at_hub() {
+    // Negative case: a Companion that computes companion_proof
+    // correctly against its real PRF, but ships a DIFFERENT
+    // prf_output on the wire (substitution, MITM, or buggy iOS
+    // build). The Hub re-derives a different KEK and the proof
+    // verification MUST fail. This is the security invariant that
+    // makes prf_output safe to send over the (already-authenticated)
+    // wire: the Hub cannot be coerced into accepting a fake one.
+    let real_companion = MockCompanion::with_fixture_prf();
+    let real_kek = real_companion.derive_kek();
+    let real_proof = compute_companion_proof(&real_kek);
+
+    // Tamper: ship a different prf_output but the original proof.
+    let tampered_prf = [0xDEu8; 32];
+    let hub_kek_from_tampered = PrimaryKek::derive(&tampered_prf, "default")
+        .expect("Hub KEK derive on tampered prf must succeed");
+
+    assert!(
+        !verify_companion_proof(&hub_kek_from_tampered, &real_proof),
+        "Tampered prf_output MUST cause companion_proof verification to fail"
+    );
+}
+
+#[test]
+fn step_c_thread_id_is_part_of_kek_info_string() {
+    // Spec §3.3: "In v1 there is exactly one DEK, thread_id =
+    // 'default'." This test pins the constant so a refactor that
+    // makes thread_id parameterisable does not silently change the
+    // wire response on existing pairings.
+    let companion = MockCompanion::with_fixture_prf();
+    let kek_default = companion.derive_kek();
+    let kek_other =
+        PrimaryKek::derive(&companion.prf_output, "not-default").expect("derive ok");
+    assert_ne!(
+        hex::encode(kek_default.as_bytes()),
+        hex::encode(kek_other.as_bytes()),
+        "thread_id is part of the HKDF info string (§1.3); changing it MUST change the KEK"
+    );
+}
