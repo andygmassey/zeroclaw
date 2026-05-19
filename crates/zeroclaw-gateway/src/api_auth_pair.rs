@@ -79,6 +79,15 @@ pub struct PairInitResponse {
 /// Request body for POST /auth/pair/register (SHARED_AUTH_SPEC.md §3.3 Step C).
 ///
 /// Strict parsing: unknown top-level fields MUST be rejected (§3.7).
+///
+/// `prf_output` carries the 32-byte PRF `first` output the Companion received
+/// from its passkey in Step B. It is transported on the wire because the
+/// WebAuthn L3 PRF eval result for `create()` lives in `clientExtensionResults`
+/// on iOS rather than inside the `attestation_object`, so the Hub cannot
+/// recover it by parsing CBOR. Sending it as a dedicated field is the clean
+/// approach; correctness is enforced by `companion_proof` verification, which
+/// will reject any value of `prf_output` the Companion did not actually
+/// derive its KEK from.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PairRegisterRequest {
@@ -87,7 +96,34 @@ pub struct PairRegisterRequest {
     pub credential_id: String,
     pub attestation_object: String,
     pub client_data_json: String,
+    pub prf_output: String,
     pub companion_proof: String,
+}
+
+/// Response body for POST /auth/pair/register (SHARED_AUTH_SPEC.md §3.3 Step C).
+#[derive(Debug, Serialize)]
+pub struct PairRegisterResponse {
+    pub spec_version: u8,
+    pub wrapped_dek: String,
+    pub thread_id: &'static str,
+    pub hub_proof: String,
+}
+
+/// On-disk shape of `${OSTLER_DIR}/security/passkey.json`.
+///
+/// Per SHARED_AUTH_SPEC.md §3.3 the Hub persists `(credential_id, user_handle,
+/// wrapped_dek)` to a single file. `raw_dek_b64u` is a Hub-private addition
+/// not on the wire: the Hub needs the raw DEK to re-wrap on subsequent
+/// registrations (re-pair flow). The whole file is mode 0600; FileVault
+/// protects it at rest. Keychain migration is post-launch hardening.
+#[derive(Debug, Serialize, Deserialize)]
+struct PasskeyFile {
+    schema_version: u8,
+    thread_id: String,
+    credential_id: String,
+    user_handle: String,
+    wrapped_dek: String,
+    raw_dek_b64u: String,
 }
 
 /// Validate the spec version of an incoming request. Returns HTTP 426 on mismatch.
@@ -197,21 +233,46 @@ pub async fn handle_pair_init(
     .into_response()
 }
 
-/// POST /auth/pair/register handler — partial impl (PR 4).
+/// POST /auth/pair/register handler — full implementation (SHARED_AUTH_SPEC.md §3.3 Step C).
 ///
-/// Implemented:
-/// - JSON parsing + spec_version check.
-/// - pairing_token validity check.
-/// - companion_proof base64url decode + length validation (32 B per §3.3 Step C).
+/// Flow:
+///   1. Validate request shape + spec_version + token validity.
+///   2. Base64url-decode `prf_output` and `companion_proof`; both MUST be 32 bytes.
+///   3. Quick credential_id sanity check (decodes as base64url).
+///   4. Derive the primary KEK from `prf_output` via §1.3.
+///   5. Verify the companion_proof against the freshly-derived KEK. If it does
+///      not match, the Companion either lied about `prf_output` or used a
+///      different KEK derivation. Either way, reject with HTTP 401 and a
+///      structured error body so the iOS Companion can surface a clear
+///      pairing-failed message.
+///   6. Look up the existing `sync DEK` from `${OSTLER_DIR}/security/passkey.json`
+///      if a prior pairing produced one; otherwise generate a fresh 32-byte DEK.
+///      v1 has exactly one DEK, `thread_id = "default"` (spec §3.3).
+///   7. Wrap the DEK under the primary KEK via AES-KW (§2) -> 40 B wrapped_dek.
+///   8. Compute the hub_proof for return-trip verification (§3.3, HMAC over
+///      `"creativemachines/pair/proof/v1/hub"` keyed with the KEK).
+///   9. Persist `(credential_id, wrapped_dek, raw_dek_b64u)` to disk for the
+///      re-pair flow. user_handle is left empty in v1 (the spec persists it
+///      but no current Hub surface reads it; future multi-account support
+///      will plumb it through `PairingTokenStore` so Step A's issued
+///      user_handle survives until Step C).
+///  10. Mark the pairing_token as consumed (single-use per §3.4).
+///  11. Respond 200 with `{ spec_version, wrapped_dek, thread_id: "default",
+///      hub_proof }`.
 ///
-/// Pending (TODO): WebAuthn attestation parsing for PRF output extraction.
-/// The crypto that closes the loop (HKDF KEK, AES-KW wrap, hub_proof) is fully
-/// implemented and tested in `zeroclaw_runtime::security::pair_handshake` —
-/// see fixture `primary_kek_matches_spec_fixture` and `aes_kw_matches_rfc3394_vector`
-/// for byte-identical-to-spec verification.
+/// Failure mapping:
+///   - Body parse / decode failure         -> 400
+///   - Spec version mismatch                -> 426
+///   - Token unknown / expired / consumed   -> 404 / 410 / 410 per §3.3.4 / §3.2 / §3.4
+///   - companion_proof verification failure -> 401
+///   - DEK file read failure / write failure (disk IO) -> 500 with structured detail
 ///
-/// Until PRF extraction lands, this handler returns HTTP 501 with a structured
-/// error body so iOS sees a clear "not yet" rather than 404.
+/// No request body, response body, prf_output bytes, KEK bytes, raw DEK bytes,
+/// or wrapped DEK bytes are logged. The handler emits at most a single
+/// structured `tracing::info!` with `credential_id_prefix` (first 8 chars of
+/// the b64url id, deterministic, low-sensitivity) + spec citation when it
+/// succeeds. Failure logs include only the error code, not the offending
+/// material.
 pub async fn handle_pair_register(
     State(state): State<AppState>,
     body: Result<Json<PairRegisterRequest>, axum::extract::rejection::JsonRejection>,
@@ -242,6 +303,37 @@ pub async fn handle_pair_register(
         return (code, body).into_response();
     }
 
+    // prf_output is base64url-unpadded, exactly 32 bytes (SHARED_AUTH_SPEC.md
+    // §3.3 Step C). Decode + length-check before any crypto.
+    let prf_output = match URL_SAFE_NO_PAD.decode(&req.prf_output) {
+        Ok(b) => b,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "prf_output_decode_failed",
+                    "spec": "SHARED_AUTH_SPEC.md §3.3 Step C",
+                    "detail": e.to_string(),
+                })),
+            )
+                .into_response();
+        }
+    };
+    if prf_output.len()
+        != zeroclaw_runtime::security::pair_handshake::PRF_OUTPUT_LEN
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "prf_output_wrong_length",
+                "spec": "SHARED_AUTH_SPEC.md §3.3 Step C",
+                "expected": zeroclaw_runtime::security::pair_handshake::PRF_OUTPUT_LEN,
+                "got": prf_output.len(),
+            })),
+        )
+            .into_response();
+    }
+
     // companion_proof is base64url-unpadded, 32 bytes per HMAC-SHA256.
     let companion_proof = match URL_SAFE_NO_PAD.decode(&req.companion_proof) {
         Ok(b) => b,
@@ -257,13 +349,15 @@ pub async fn handle_pair_register(
                 .into_response();
         }
     };
-    if companion_proof.len() != 32 {
+    if companion_proof.len()
+        != zeroclaw_runtime::security::pair_handshake::PROOF_LEN
+    {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
                 "error": "companion_proof_wrong_length",
                 "spec": "SHARED_AUTH_SPEC.md §3.3 Step C",
-                "expected": 32,
+                "expected": zeroclaw_runtime::security::pair_handshake::PROOF_LEN,
                 "got": companion_proof.len(),
             })),
         )
@@ -282,21 +376,240 @@ pub async fn handle_pair_register(
             .into_response();
     }
 
-    // PRF extraction from `attestation_object` is the missing piece. Until it
-    // lands, surface a structured 501 so iOS knows the handshake is reserved
-    // for this exact flow (not a routing 404, not an auth 401).
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(serde_json::json!({
-            "error": "pairing_register_pending_prf_extraction",
-            "spec": "SHARED_AUTH_SPEC.md §3.3 Step C",
-            "spec_version": SPEC_VERSION,
-            "message": "Hub crypto (HKDF KEK + AES-KW + companion_proof) is in place. \
-                        WebAuthn attestation parsing for PRF output is the remaining gap; \
-                        once it lands, this handler returns wrapped_dek + hub_proof.",
-        })),
-    )
-        .into_response()
+    // Derive the primary KEK from prf_output via §1.3. thread_id is the v1
+    // fixed value "default" (spec §3.3: "In v1 there is exactly one DEK,
+    // thread_id = 'default'").
+    let kek = match zeroclaw_runtime::security::pair_handshake::PrimaryKek::derive(
+        &prf_output,
+        zeroclaw_runtime::security::pair_handshake::DEFAULT_THREAD_ID,
+    ) {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::warn!(error = %e, "pair-register: KEK derivation failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "kek_derivation_failed",
+                    "spec": "SHARED_AUTH_SPEC.md §1.3",
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Verify the companion proof. A mismatch means the Companion either lied
+    // about prf_output, used a different KEK derivation, or computed the proof
+    // over a different HMAC input. Any of those = reject with 401.
+    if !zeroclaw_runtime::security::pair_handshake::verify_companion_proof(
+        &kek,
+        &companion_proof,
+    ) {
+        tracing::warn!(
+            "pair-register: companion_proof verification failed"
+        );
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": "companion_proof_mismatch",
+                "spec": "SHARED_AUTH_SPEC.md §3.3 Step C",
+                "detail": "companion_proof does not match the KEK derived from prf_output; \
+                           the Companion did not supply the PRF output it actually computed \
+                           its proof over.",
+            })),
+        )
+            .into_response();
+    }
+
+    // Look up an existing DEK on disk, else generate a fresh one. v1 keeps a
+    // single DEK keyed by thread_id = "default" in the passkey file.
+    let workspace_dir = {
+        let cfg = state.config.lock();
+        cfg.workspace_dir.clone()
+    };
+    let security_dir = workspace_dir.join("security");
+    let passkey_path = security_dir.join("passkey.json");
+
+    let dek = match load_or_generate_dek(&passkey_path) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(error = %e, "pair-register: DEK load/generate failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": "dek_io_failed",
+                    "spec": "SHARED_AUTH_SPEC.md §3.3 Step C",
+                    "detail": e.to_string(),
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let wrapped_dek = zeroclaw_runtime::security::pair_handshake::wrap_dek(&kek, &dek);
+    let hub_proof = zeroclaw_runtime::security::pair_handshake::compute_hub_proof(&kek);
+
+    // Persist the public material + the raw DEK (Hub-private). The whole file
+    // is mode 0600 because raw_dek_b64u is sensitive.
+    if let Err(e) = persist_passkey_file(
+        &security_dir,
+        &passkey_path,
+        &req.credential_id,
+        &URL_SAFE_NO_PAD.encode(wrapped_dek),
+        &URL_SAFE_NO_PAD.encode(dek),
+    ) {
+        tracing::warn!(error = %e, "pair-register: passkey file write failed");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "passkey_persist_failed",
+                "spec": "SHARED_AUTH_SPEC.md §3.3 Step C",
+                "detail": e.to_string(),
+            })),
+        )
+            .into_response();
+    }
+
+    // Token is consumed only after the full Step C succeeded (§3.4).
+    if let Err(status) = state.pairing_token_store.consume(&req.pairing_token) {
+        // Token went stale between status() check and consume() (e.g. expiry
+        // race). Map to the spec'd HTTP code and bail.
+        let (code, body) = token_status_to_response(status);
+        return (code, body).into_response();
+    }
+
+    let credential_id_prefix = req
+        .credential_id
+        .chars()
+        .take(8)
+        .collect::<String>();
+    tracing::info!(
+        credential_id_prefix = %credential_id_prefix,
+        thread_id = %zeroclaw_runtime::security::pair_handshake::DEFAULT_THREAD_ID,
+        "pair-register: completed (SHARED_AUTH_SPEC.md §3.3 Step C)"
+    );
+
+    Json(PairRegisterResponse {
+        spec_version: SPEC_VERSION,
+        wrapped_dek: URL_SAFE_NO_PAD.encode(wrapped_dek),
+        thread_id: zeroclaw_runtime::security::pair_handshake::DEFAULT_THREAD_ID,
+        hub_proof: URL_SAFE_NO_PAD.encode(hub_proof),
+    })
+    .into_response()
+}
+
+/// Load the existing raw DEK from the passkey file, or generate a fresh one
+/// if no file exists yet.
+///
+/// Returns the 32-byte raw DEK ready for `wrap_dek` / sync use.
+///
+/// On first-ever pairing: file does not exist -> generate a fresh DEK via the
+/// pair_handshake helper, hand it back, defer write to `persist_passkey_file`
+/// (which writes the full file atomically once the wrapped_dek is also known).
+/// On re-pair (subsequent pairing, same or different device): file exists,
+/// read raw_dek_b64u, decode, return. The DEK is invariant across pairings
+/// in v1 so the Companion's wrapped DEK stays unwrappable across re-pair.
+///
+/// Errors are bubbled as `std::io::Error` for handler-side mapping to 500.
+fn load_or_generate_dek(
+    passkey_path: &std::path::Path,
+) -> std::io::Result<[u8; zeroclaw_runtime::security::pair_handshake::DEK_LEN]> {
+    if !passkey_path.exists() {
+        return Ok(zeroclaw_runtime::security::pair_handshake::generate_dek());
+    }
+    let body = std::fs::read_to_string(passkey_path)?;
+    let parsed: PasskeyFile = serde_json::from_str(&body).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("passkey.json parse failed: {e}"),
+        )
+    })?;
+    let raw = URL_SAFE_NO_PAD
+        .decode(&parsed.raw_dek_b64u)
+        .map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("raw_dek_b64u decode failed: {e}"),
+            )
+        })?;
+    let mut dek = [0u8; zeroclaw_runtime::security::pair_handshake::DEK_LEN];
+    if raw.len() != dek.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "raw_dek_b64u decoded to {} bytes, expected {}",
+                raw.len(),
+                dek.len()
+            ),
+        ));
+    }
+    dek.copy_from_slice(&raw);
+    Ok(dek)
+}
+
+/// Write the passkey file atomically with mode 0600.
+///
+/// `${OSTLER_DIR}/security/passkey.json` per SHARED_AUTH_SPEC.md §3.3.
+/// Atomic = write to a sibling `passkey.json.tmp` first, fsync, rename. The
+/// crash-safety story is the standard write-rename-fsync chain; we accept that
+/// a power-loss between rename and parent-dir-fsync may leave the file
+/// invisible until the next pairing (acceptable for an explicitly user-driven
+/// operation that the user can re-run).
+///
+/// user_handle is persisted empty in v1. Spec lists it as a persisted field
+/// but no current Hub surface consumes it; future multi-account support will
+/// plumb the Step-A-issued user_handle through `PairingTokenStore` so Step C
+/// can persist the right value. The empty-string placeholder keeps the file
+/// schema forward-compatible.
+fn persist_passkey_file(
+    security_dir: &std::path::Path,
+    passkey_path: &std::path::Path,
+    credential_id: &str,
+    wrapped_dek_b64u: &str,
+    raw_dek_b64u: &str,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    std::fs::create_dir_all(security_dir)?;
+    // Tighten the directory mode too (0700) so siblings the security dir picks
+    // up later inherit a private parent.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mut perm = std::fs::metadata(security_dir)?.permissions();
+        perm.set_mode(0o700);
+        std::fs::set_permissions(security_dir, perm)?;
+    }
+
+    let body = PasskeyFile {
+        schema_version: 1,
+        thread_id: zeroclaw_runtime::security::pair_handshake::DEFAULT_THREAD_ID
+            .to_string(),
+        credential_id: credential_id.to_string(),
+        user_handle: String::new(),
+        wrapped_dek: wrapped_dek_b64u.to_string(),
+        raw_dek_b64u: raw_dek_b64u.to_string(),
+    };
+    let serialised = serde_json::to_vec_pretty(&body).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("passkey.json serialise failed: {e}"),
+        )
+    })?;
+
+    let tmp_path = passkey_path.with_extension("json.tmp");
+    {
+        let mut tmp = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp_path)?;
+        tmp.write_all(&serialised)?;
+        tmp.sync_all()?;
+    }
+    std::fs::rename(&tmp_path, passkey_path)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -329,16 +642,72 @@ mod tests {
 
     #[test]
     fn pair_register_request_strict_parsing() {
-        let body = r#"{"spec_version":1,"pairing_token":"x","credential_id":"c","attestation_object":"a","client_data_json":"d","companion_proof":"p","mystery":"!"}"#;
+        let body = r#"{"spec_version":1,"pairing_token":"x","credential_id":"c","attestation_object":"a","client_data_json":"d","prf_output":"o","companion_proof":"p","mystery":"!"}"#;
         let parsed: Result<PairRegisterRequest, _> = serde_json::from_str(body);
         assert!(parsed.is_err());
     }
 
     #[test]
     fn pair_register_request_accepts_all_fields() {
-        let body = r#"{"spec_version":1,"pairing_token":"x","credential_id":"c","attestation_object":"a","client_data_json":"d","companion_proof":"p"}"#;
+        let body = r#"{"spec_version":1,"pairing_token":"x","credential_id":"c","attestation_object":"a","client_data_json":"d","prf_output":"o","companion_proof":"p"}"#;
         let parsed: PairRegisterRequest = serde_json::from_str(body).expect("valid body");
         assert_eq!(parsed.spec_version, 1);
+        assert_eq!(parsed.prf_output, "o");
+    }
+
+    #[test]
+    fn pair_register_request_rejects_missing_prf_output() {
+        let body = r#"{"spec_version":1,"pairing_token":"x","credential_id":"c","attestation_object":"a","client_data_json":"d","companion_proof":"p"}"#;
+        let parsed: Result<PairRegisterRequest, _> = serde_json::from_str(body);
+        assert!(parsed.is_err(), "prf_output is required per §3.3 Step C");
+    }
+
+    #[test]
+    fn load_or_generate_dek_creates_when_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("passkey.json");
+        let dek = load_or_generate_dek(&path).expect("generate");
+        assert_eq!(
+            dek.len(),
+            zeroclaw_runtime::security::pair_handshake::DEK_LEN
+        );
+        // Did not create the file (the handler writes via persist_passkey_file
+        // after the wrap step).
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn persist_then_load_round_trips_dek() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let security_dir = tmp.path().to_path_buf();
+        let passkey_path = security_dir.join("passkey.json");
+
+        let dek = zeroclaw_runtime::security::pair_handshake::generate_dek();
+        let wrapped = [0xABu8; 40];
+
+        persist_passkey_file(
+            &security_dir,
+            &passkey_path,
+            "cred-id-fixture",
+            &URL_SAFE_NO_PAD.encode(wrapped),
+            &URL_SAFE_NO_PAD.encode(dek),
+        )
+        .expect("persist");
+
+        // Mode 0600 (Unix only).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&passkey_path)
+                .expect("stat")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "passkey.json must be mode 0600");
+        }
+
+        let loaded = load_or_generate_dek(&passkey_path).expect("reload");
+        assert_eq!(loaded, dek, "raw DEK must round-trip through passkey.json");
     }
 
     #[test]
