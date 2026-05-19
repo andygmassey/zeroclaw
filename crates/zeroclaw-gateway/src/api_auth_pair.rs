@@ -553,7 +553,6 @@ fn persist_passkey_file(
     raw_dek_b64u: &str,
 ) -> std::io::Result<()> {
     use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
 
     std::fs::create_dir_all(security_dir)?;
     // Tighten the directory mode too (0700) so siblings the security dir picks
@@ -583,12 +582,20 @@ fn persist_passkey_file(
 
     let tmp_path = passkey_path.with_extension("json.tmp");
     {
-        let mut tmp = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp_path)?;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        // The 0o600 mode is the on-disk gate that keeps the wrapped DEK
+        // unreadable by other local users. Only Unix targets surface a
+        // POSIX mode bit; on Windows the file inherits default ACLs.
+        // In practice the Hub only runs on macOS, so the Windows branch
+        // exists purely to keep the workspace compiling on the
+        // x86_64-pc-windows-msvc CI matrix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            opts.mode(0o600);
+        }
+        let mut tmp = opts.open(&tmp_path)?;
         tmp.write_all(&serialised)?;
         tmp.sync_all()?;
     }
