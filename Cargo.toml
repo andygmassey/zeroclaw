@@ -235,6 +235,7 @@ default = [
     "agent-runtime",
     "observability-prometheus",
     "schema-export",
+    "webauthn",
 ]
 
 # The full agent runtime — agent loop, channels, tools, gateway, TUI, all subsystems.
