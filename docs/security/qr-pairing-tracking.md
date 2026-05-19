@@ -1,10 +1,31 @@
 # iOS Companion ↔ Hub QR pairing — implementation tracker
 
-**Status:** in flight (foundation PR landed 2026-05-09).
+**Status:** v0.3.1 (foundation PR landed 2026-05-09; full handshake landed in PR #40 on 2026-05-19; wire-shape contract tests added 2026-05-20).
 **Owner:** ostler-ai/ostler-assistant maintainers.
 **Spec:** `SHARED_AUTH_SPEC.md` (HR015 repo, frozen 2026-04-23, three-party signoff).
 **Audit:** `/tmp/QR_PAIRING_AUDIT_2026-05-09.md` — full forensic at branch
 freeze; copy in HR015.
+
+## Status update 2026-05-20 (post-F12 trio + Windows-compat)
+
+The earlier "Hub gap" table below predates the F12 trio that landed tonight (2026-05-19 / 2026-05-20):
+
+- HR015 PR #119 (merged) — SHARED_AUTH_SPEC.md §3.3 patch with `prf_output` on the wire + `~/.lifeline/security/` → `~/.ostler/security/` path rebrand.
+- ostler-assistant PR #40 (merged at `de725fa3`) — full `handle_pair_register` Step C: `pairing_token` validation, `prf_output` decode, primary-KEK re-derive via HKDF-SHA256, `companion_proof` HMAC verification, DEK generate-or-reload, AES-KW wrap to 40-byte output, `hub_proof` HMAC, atomic mode-0600 persistence at `${OSTLER_DIR}/security/passkey.json`. Routes wired in `crates/zeroclaw-gateway/src/lib.rs:1108-1111`.
+- CM031 PR #91 (merged) — Swift `prfOutput: Data` field on `PairRegisterRequest` + encoder + `runPairRegister` plumbing, so iOS sends the wire shape `api_auth_pair::PairRegisterRequest` expects.
+- ostler-assistant PR #41 (merged at `373b07d5`) — added `webauthn` to default features so release builds resolve `pair_handshake`.
+- ostler-assistant PR #42 (merged at `afd60ac9`) — gated `OpenOptionsExt::mode(0o600)` with `#[cfg(unix)]` so `persist_passkey_file` builds on the `x86_64-pc-windows-msvc` matrix.
+- ostler-assistant PR #26 (merged at `6693c824`) — end-to-end integration tests for the Step C crypto round-trip + tamper detection.
+
+CM031's strict-decoder key sets (`HubPairingAPI.swift:127-130` for init, `HubPairingAPI.swift:152-154` for register) and Hub's serde structs (`PairInitResponse`, `PairRegisterResponse`) align byte-for-byte. The cross-repo audit's WSA-001 + WSA-002 findings were generated against pre-F12-trio state and are no longer accurate; they should be marked RESOLVED.
+
+Wire-shape contract tests now in `crates/zeroclaw-gateway/src/api_auth_pair.rs` `mod tests`:
+- `pair_init_response_emits_exact_ios_expected_keys`
+- `pair_register_response_emits_exact_ios_expected_keys`
+- `pair_init_response_field_types_match_ios_decoder`
+- `pair_register_response_field_types_match_ios_decoder`
+
+These pin the serialised shape against the iOS strict-decoder expected key set + base64url byte counts. A future serde rename or response-field drift fails CI here rather than at first customer install.
 
 ## Why this exists
 
@@ -55,12 +76,12 @@ Crypto invariants (§1 of spec):
 - `companion_proof` = HMAC-SHA256(KEK, `"creativemachines/pair/proof/v1"`).
 - `hub_proof` = HMAC-SHA256(KEK, `"creativemachines/pair/proof/v1/hub"`).
 
-## Hub gap as of 2026-05-09 (audit findings)
+## Hub gap as of 2026-05-09 (audit findings — SUPERSEDED, see status update above)
 
 | Spec requirement                              | Hub source | v0.2.0 binary |
 |-----------------------------------------------|------------|---------------|
-| `POST /auth/pair/init`                        | absent     | absent        |
-| `POST /auth/pair/register`                    | absent     | absent        |
+| `POST /auth/pair/init`                        | present (lib.rs:1108, api_auth_pair.rs:185) | v0.3.1 |
+| `POST /auth/pair/register`                    | present (lib.rs:1110, api_auth_pair.rs:236) | v0.3.1 |
 | `pairing_token` (32B base64url, 10-min)       | absent (uses 6-digit code) | absent |
 | WebAuthn registration verification            | code exists, feature off in release CI | absent |
 | PRF extension                                 | absent     | absent        |

@@ -751,4 +751,147 @@ mod tests {
         let (code, _body) = token_status_to_response(TokenStatus::Consumed);
         assert_eq!(code, StatusCode::GONE);
     }
+
+    // ── iOS wire-shape contract tests ─────────────────────────────────
+    //
+    // These pin the Hub-side serde output to the exact key set CM031's
+    // strict decoder expects in `CM031/Sources/Pairing/HubPairingAPI.swift`.
+    // The cross-repo audit at launch/CROSS_REPO_WIRE_SHAPE_AUDIT_2026-05-20.md
+    // (WSA-001 + WSA-002) flagged these endpoints as "missing" because the
+    // audit ran against pre-PR-#40 state. Routes are live, but no CI guard
+    // existed against a future serde rename silently breaking iOS decoding.
+    // These tests close that gap.
+
+    fn serialised_object_keys<T: serde::Serialize>(value: &T) -> std::collections::BTreeSet<String> {
+        let json = serde_json::to_value(value).expect("serialise");
+        let obj = json.as_object().expect("top-level object");
+        obj.keys().cloned().collect()
+    }
+
+    #[test]
+    fn pair_init_response_emits_exact_ios_expected_keys() {
+        // From CM031/Sources/Pairing/HubPairingAPI.swift:127-130 strict
+        // decoder. Any drift on either side breaks pairing for fresh
+        // installs. Pin the contract.
+        let response = PairInitResponse {
+            spec_version: SPEC_VERSION,
+            registration_challenge: random_b64url(32),
+            rp_id: "creativemachines.ai",
+            rp_name: "Ostler",
+            user_handle: random_b64url(16),
+            user_name: "ostler",
+            user_display_name: "Ostler",
+        };
+        let actual: std::collections::BTreeSet<String> = serialised_object_keys(&response);
+        let expected: std::collections::BTreeSet<String> = [
+            "spec_version",
+            "registration_challenge",
+            "rp_id",
+            "rp_name",
+            "user_handle",
+            "user_name",
+            "user_display_name",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            actual, expected,
+            "PairInitResponse serde keys must match CM031 HubPairingDecoder.decodePairInitResponse expected set"
+        );
+    }
+
+    #[test]
+    fn pair_register_response_emits_exact_ios_expected_keys() {
+        // From CM031/Sources/Pairing/HubPairingAPI.swift:152-154 strict
+        // decoder.
+        let response = PairRegisterResponse {
+            spec_version: SPEC_VERSION,
+            wrapped_dek: random_b64url(40),
+            thread_id: "default",
+            hub_proof: random_b64url(32),
+        };
+        let actual: std::collections::BTreeSet<String> = serialised_object_keys(&response);
+        let expected: std::collections::BTreeSet<String> = [
+            "spec_version",
+            "wrapped_dek",
+            "thread_id",
+            "hub_proof",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            actual, expected,
+            "PairRegisterResponse serde keys must match CM031 HubPairingDecoder.decodePairRegisterResponse expected set"
+        );
+    }
+
+    #[test]
+    fn pair_init_response_field_types_match_ios_decoder() {
+        // iOS decoder expects: spec_version int, three strings (rp_id,
+        // rp_name, user_name, user_display_name), and two base64url
+        // strings that decode to specific byte counts
+        // (registration_challenge = 32, user_handle = 16).
+        let response = PairInitResponse {
+            spec_version: SPEC_VERSION,
+            registration_challenge: random_b64url(32),
+            rp_id: "creativemachines.ai",
+            rp_name: "Ostler",
+            user_handle: random_b64url(16),
+            user_name: "ostler",
+            user_display_name: "Ostler",
+        };
+        let json = serde_json::to_value(&response).expect("serialise");
+        assert!(json["spec_version"].is_u64() || json["spec_version"].is_i64());
+        assert!(json["registration_challenge"].is_string());
+        assert!(json["rp_id"].is_string());
+        assert!(json["rp_name"].is_string());
+        assert!(json["user_handle"].is_string());
+        assert!(json["user_name"].is_string());
+        assert!(json["user_display_name"].is_string());
+        // 32 raw bytes -> 43 base64url-unpadded chars.
+        let chal = json["registration_challenge"].as_str().expect("str");
+        assert_eq!(
+            chal.len(),
+            43,
+            "registration_challenge must be base64url-unpadded of 32 bytes (iOS expects 32 B after decode)"
+        );
+        // 16 raw bytes -> 22 base64url-unpadded chars.
+        let user_handle = json["user_handle"].as_str().expect("str");
+        assert_eq!(
+            user_handle.len(),
+            22,
+            "user_handle must be base64url-unpadded of 16 bytes (iOS expects 16 B after decode)"
+        );
+    }
+
+    #[test]
+    fn pair_register_response_field_types_match_ios_decoder() {
+        let response = PairRegisterResponse {
+            spec_version: SPEC_VERSION,
+            wrapped_dek: random_b64url(40),
+            thread_id: "default",
+            hub_proof: random_b64url(32),
+        };
+        let json = serde_json::to_value(&response).expect("serialise");
+        assert!(json["spec_version"].is_u64() || json["spec_version"].is_i64());
+        assert!(json["wrapped_dek"].is_string());
+        assert!(json["thread_id"].is_string());
+        assert!(json["hub_proof"].is_string());
+        // 40 raw bytes -> 54 base64url-unpadded chars.
+        let wrapped = json["wrapped_dek"].as_str().expect("str");
+        assert_eq!(
+            wrapped.len(),
+            54,
+            "wrapped_dek must be base64url-unpadded of 40 bytes (iOS expects 40 B after decode)"
+        );
+        // 32 raw bytes -> 43 base64url-unpadded chars.
+        let hub_proof = json["hub_proof"].as_str().expect("str");
+        assert_eq!(
+            hub_proof.len(),
+            43,
+            "hub_proof must be base64url-unpadded of 32 bytes (iOS expects 32 B after decode)"
+        );
+    }
 }
