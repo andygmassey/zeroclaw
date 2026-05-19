@@ -319,9 +319,7 @@ pub async fn handle_pair_register(
                 .into_response();
         }
     };
-    if prf_output.len()
-        != zeroclaw_runtime::security::pair_handshake::PRF_OUTPUT_LEN
-    {
+    if prf_output.len() != zeroclaw_runtime::security::pair_handshake::PRF_OUTPUT_LEN {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
@@ -349,9 +347,7 @@ pub async fn handle_pair_register(
                 .into_response();
         }
     };
-    if companion_proof.len()
-        != zeroclaw_runtime::security::pair_handshake::PROOF_LEN
-    {
+    if companion_proof.len() != zeroclaw_runtime::security::pair_handshake::PROOF_LEN {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
@@ -400,13 +396,8 @@ pub async fn handle_pair_register(
     // Verify the companion proof. A mismatch means the Companion either lied
     // about prf_output, used a different KEK derivation, or computed the proof
     // over a different HMAC input. Any of those = reject with 401.
-    if !zeroclaw_runtime::security::pair_handshake::verify_companion_proof(
-        &kek,
-        &companion_proof,
-    ) {
-        tracing::warn!(
-            "pair-register: companion_proof verification failed"
-        );
+    if !zeroclaw_runtime::security::pair_handshake::verify_companion_proof(&kek, &companion_proof) {
+        tracing::warn!("pair-register: companion_proof verification failed");
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({
@@ -477,11 +468,7 @@ pub async fn handle_pair_register(
         return (code, body).into_response();
     }
 
-    let credential_id_prefix = req
-        .credential_id
-        .chars()
-        .take(8)
-        .collect::<String>();
+    let credential_id_prefix = req.credential_id.chars().take(8).collect::<String>();
     tracing::info!(
         credential_id_prefix = %credential_id_prefix,
         thread_id = %zeroclaw_runtime::security::pair_handshake::DEFAULT_THREAD_ID,
@@ -523,14 +510,12 @@ fn load_or_generate_dek(
             format!("passkey.json parse failed: {e}"),
         )
     })?;
-    let raw = URL_SAFE_NO_PAD
-        .decode(&parsed.raw_dek_b64u)
-        .map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("raw_dek_b64u decode failed: {e}"),
-            )
-        })?;
+    let raw = URL_SAFE_NO_PAD.decode(&parsed.raw_dek_b64u).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("raw_dek_b64u decode failed: {e}"),
+        )
+    })?;
     let mut dek = [0u8; zeroclaw_runtime::security::pair_handshake::DEK_LEN];
     if raw.len() != dek.len() {
         return Err(std::io::Error::new(
@@ -583,8 +568,7 @@ fn persist_passkey_file(
 
     let body = PasskeyFile {
         schema_version: 1,
-        thread_id: zeroclaw_runtime::security::pair_handshake::DEFAULT_THREAD_ID
-            .to_string(),
+        thread_id: zeroclaw_runtime::security::pair_handshake::DEFAULT_THREAD_ID.to_string(),
         credential_id: credential_id.to_string(),
         user_handle: String::new(),
         wrapped_dek: wrapped_dek_b64u.to_string(),
