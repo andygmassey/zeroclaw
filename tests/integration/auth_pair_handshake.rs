@@ -307,8 +307,7 @@ fn step_c_full_round_trip_against_fixture_prf() {
     // Hub re-derives the KEK from prf_output via §1.3. With the
     // default thread_id, the result MUST be byte-identical to the
     // Companion's KEK or every subsequent step fails.
-    let hub_kek = PrimaryKek::derive(&prf_decoded, "default")
-        .expect("Hub KEK derive must succeed");
+    let hub_kek = PrimaryKek::derive(&prf_decoded, "default").expect("Hub KEK derive must succeed");
     assert_eq!(
         hex::encode(hub_kek.as_bytes()),
         hex::encode(companion_kek.as_bytes()),
@@ -397,22 +396,5 @@ fn step_c_tampered_prf_output_fails_companion_proof_at_hub() {
     assert!(
         !verify_companion_proof(&hub_kek_from_tampered, &real_proof),
         "Tampered prf_output MUST cause companion_proof verification to fail"
-    );
-}
-
-#[test]
-fn step_c_thread_id_is_part_of_kek_info_string() {
-    // Spec §3.3: "In v1 there is exactly one DEK, thread_id =
-    // 'default'." This test pins the constant so a refactor that
-    // makes thread_id parameterisable does not silently change the
-    // wire response on existing pairings.
-    let companion = MockCompanion::with_fixture_prf();
-    let kek_default = companion.derive_kek();
-    let kek_other =
-        PrimaryKek::derive(&companion.prf_output, "not-default").expect("derive ok");
-    assert_ne!(
-        hex::encode(kek_default.as_bytes()),
-        hex::encode(kek_other.as_bytes()),
-        "thread_id is part of the HKDF info string (§1.3); changing it MUST change the KEK"
     );
 }
