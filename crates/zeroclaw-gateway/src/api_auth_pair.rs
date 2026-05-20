@@ -762,7 +762,9 @@ mod tests {
     // existed against a future serde rename silently breaking iOS decoding.
     // These tests close that gap.
 
-    fn serialised_object_keys<T: serde::Serialize>(value: &T) -> std::collections::BTreeSet<String> {
+    fn serialised_object_keys<T: serde::Serialize>(
+        value: &T,
+    ) -> std::collections::BTreeSet<String> {
         let json = serde_json::to_value(value).expect("serialise");
         let obj = json.as_object().expect("top-level object");
         obj.keys().cloned().collect()
@@ -812,15 +814,11 @@ mod tests {
             hub_proof: random_b64url(32),
         };
         let actual: std::collections::BTreeSet<String> = serialised_object_keys(&response);
-        let expected: std::collections::BTreeSet<String> = [
-            "spec_version",
-            "wrapped_dek",
-            "thread_id",
-            "hub_proof",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+        let expected: std::collections::BTreeSet<String> =
+            ["spec_version", "wrapped_dek", "thread_id", "hub_proof"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
         assert_eq!(
             actual, expected,
             "PairRegisterResponse serde keys must match CM031 HubPairingDecoder.decodePairRegisterResponse expected set"
