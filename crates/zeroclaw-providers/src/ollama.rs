@@ -154,6 +154,26 @@ impl OllamaProvider {
             .is_some_and(|host| matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1"))
     }
 
+    /// Compute the `think` value to send for a given model.
+    ///
+    /// gemma4 always returns `Some(false)`: the gemma4 family on Ollama
+    /// defaults to streaming hidden chain-of-thought tokens (the `thinking`
+    /// field on the response), which adds 2-5s of TTFT and 150-500 wasted
+    /// tokens to every reply without changing answer quality on the
+    /// customer-tier benchmark (see HR015
+    /// launch/BENCHMARK_GEMMA4_E2B_VS_QWEN35_3B_2026-05-20.md).
+    /// We force-disable thinking for any `gemma4:*` tag.
+    ///
+    /// For all other models the configured value passes through unchanged
+    /// (None -> field omitted, Some(true) / Some(false) -> sent verbatim).
+    fn effective_think(model: &str, configured: Option<bool>) -> Option<bool> {
+        if model.starts_with("gemma4:") {
+            Some(false)
+        } else {
+            configured
+        }
+    }
+
     fn http_client(&self) -> Client {
         zeroclaw_config::schema::build_runtime_proxy_client_with_timeouts(
             "provider.ollama",
@@ -514,6 +534,8 @@ impl OllamaProvider {
         should_auth: bool,
         tools: Option<&[serde_json::Value]>,
     ) -> anyhow::Result<ApiChatResponse> {
+        let effective_think = Self::effective_think(model, self.reasoning_enabled);
+
         let result = self
             .send_request_inner(
                 &messages,
@@ -521,13 +543,13 @@ impl OllamaProvider {
                 temperature,
                 should_auth,
                 tools,
-                self.reasoning_enabled,
+                effective_think,
             )
             .await;
 
         match result {
             Ok(resp) => Ok(resp),
-            Err(first_err) if self.reasoning_enabled == Some(true) => {
+            Err(first_err) if effective_think == Some(true) => {
                 tracing::warn!(
                     model = model,
                     error = %first_err,
@@ -1013,6 +1035,48 @@ mod tests {
 
         let json = serde_json::to_value(request).unwrap();
         assert_eq!(json.get("think"), Some(&serde_json::json!(false)));
+    }
+
+    #[test]
+    fn effective_think_forces_false_for_gemma4_tags() {
+        // Any tag of the gemma4 family is overridden, regardless of the
+        // operator's runtime.reasoning_enabled config.
+        assert_eq!(
+            OllamaProvider::effective_think("gemma4:e2b", None),
+            Some(false)
+        );
+        assert_eq!(
+            OllamaProvider::effective_think("gemma4:e2b", Some(true)),
+            Some(false)
+        );
+        assert_eq!(
+            OllamaProvider::effective_think("gemma4:e4b", Some(true)),
+            Some(false)
+        );
+        assert_eq!(
+            OllamaProvider::effective_think("gemma4:26b", Some(true)),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn effective_think_passes_through_for_non_gemma4_models() {
+        // Other models keep the operator-configured behaviour.
+        assert_eq!(OllamaProvider::effective_think("qwen2.5:14b", None), None);
+        assert_eq!(
+            OllamaProvider::effective_think("qwen3.5:9b", Some(true)),
+            Some(true)
+        );
+        assert_eq!(
+            OllamaProvider::effective_think("llama3:8b", Some(false)),
+            Some(false)
+        );
+        // A model whose name merely contains the substring is not in the
+        // gemma4 family and is not overridden.
+        assert_eq!(
+            OllamaProvider::effective_think("custom/gemma4-finetune:v1", Some(true)),
+            Some(true)
+        );
     }
 
     #[test]
