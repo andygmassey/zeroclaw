@@ -1,4 +1,4 @@
-//! Tray icon management — swap icon based on connection/agent status.
+//! Tray icon management - swap icon based on connection/agent status.
 
 use crate::state::AgentStatus;
 use tauri::image::Image;
@@ -26,12 +26,12 @@ pub fn icon_for_state(connected: bool, status: AgentStatus) -> Image<'static> {
 /// Tooltip text for the current state.
 pub fn tooltip_for_state(connected: bool, status: AgentStatus) -> &'static str {
     if !connected {
-        return "ZeroClaw — Disconnected";
+        return "Ostler - Disconnected";
     }
     match status {
-        AgentStatus::Idle => "ZeroClaw — Idle",
-        AgentStatus::Working => "ZeroClaw — Working",
-        AgentStatus::Error => "ZeroClaw — Error",
+        AgentStatus::Idle => "Ostler - Idle",
+        AgentStatus::Working => "Ostler - Working",
+        AgentStatus::Error => "Ostler - Error",
     }
 }
 
@@ -41,7 +41,7 @@ mod tests {
 
     #[test]
     fn icon_disconnected_when_not_connected() {
-        // Should not panic — icon bytes are valid PNGs.
+        // Should not panic; icon bytes are valid PNGs.
         let _img = icon_for_state(false, AgentStatus::Idle);
         let _img = icon_for_state(false, AgentStatus::Working);
         let _img = icon_for_state(false, AgentStatus::Error);
@@ -58,32 +58,29 @@ mod tests {
     fn tooltip_disconnected() {
         assert_eq!(
             tooltip_for_state(false, AgentStatus::Idle),
-            "ZeroClaw — Disconnected"
+            "Ostler - Disconnected"
         );
         // Agent status is irrelevant when disconnected.
         assert_eq!(
             tooltip_for_state(false, AgentStatus::Working),
-            "ZeroClaw — Disconnected"
+            "Ostler - Disconnected"
         );
         assert_eq!(
             tooltip_for_state(false, AgentStatus::Error),
-            "ZeroClaw — Disconnected"
+            "Ostler - Disconnected"
         );
     }
 
     #[test]
     fn tooltip_connected_variants() {
-        assert_eq!(
-            tooltip_for_state(true, AgentStatus::Idle),
-            "ZeroClaw — Idle"
-        );
+        assert_eq!(tooltip_for_state(true, AgentStatus::Idle), "Ostler - Idle");
         assert_eq!(
             tooltip_for_state(true, AgentStatus::Working),
-            "ZeroClaw — Working"
+            "Ostler - Working"
         );
         assert_eq!(
             tooltip_for_state(true, AgentStatus::Error),
-            "ZeroClaw — Error"
+            "Ostler - Error"
         );
     }
 

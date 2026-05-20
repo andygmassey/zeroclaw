@@ -6,8 +6,12 @@ import path from "path";
 const gatewayPort = process.env.ZEROCLAW_GATEWAY_PORT ?? "42617";
 const gatewayTarget = `http://127.0.0.1:${gatewayPort}`;
 
+// `base: './'` produces relative asset URLs in index.html. This survives both
+// the legacy gateway-served path (mounted at /_app/) and the new Tauri
+// bundled-asset origin (served at the webview root). The dev server still uses
+// "/" so the proxy table below picks up API/WS calls correctly.
 export default defineConfig(({ command }) => ({
-  base: command === "serve" ? "/" : "/_app/",
+  base: command === "serve" ? "/" : "./",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

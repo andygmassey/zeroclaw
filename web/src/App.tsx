@@ -16,10 +16,10 @@ import Pairing from './pages/Pairing';
 import Canvas from './pages/Canvas';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { DraftContext, useDraftStore } from './hooks/useDraft';
-import { setLocale, type Locale } from './lib/i18n';
+import { setLocale, t, type Locale } from './lib/i18n';
 import { loadLocale, saveLocale } from './contexts/ThemeContext';
 import { basePath } from './lib/basePath';
-import { getAdminPairCode } from './lib/api';
+import { getAdminPairCode, getPublicHealth } from './lib/api';
 
 // Locale context
 interface LocaleContextType {
@@ -35,7 +35,7 @@ export const LocaleContext = createContext<LocaleContextType>({
 export const useLocaleContext = () => useContext(LocaleContext);
 
 // ---------------------------------------------------------------------------
-// Error boundary — catches render crashes and shows a recoverable message
+// Error boundary: catches render crashes and shows a recoverable message
 // instead of a black screen
 // ---------------------------------------------------------------------------
 
@@ -57,7 +57,7 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('[ZeroClaw] Render error:', error, info.componentStack);
+    console.error('[Ostler] Render error:', error, info.componentStack);
   }
 
   render() {
@@ -107,7 +107,7 @@ function PairingDialog({ onPair }: { onPair: (code: string) => Promise<void> }) 
         }
       })
       .catch(() => {
-        // Endpoint not reachable — user must check terminal / docker logs
+        // Endpoint not reachable; user must check terminal / docker logs.
       })
       .finally(() => {
         if (!cancelled) setCodeLoading(false);
@@ -135,14 +135,14 @@ function PairingDialog({ onPair }: { onPair: (code: string) => Promise<void> }) 
 
         <div className="text-center mb-8">
           <img
-            src={`${basePath}/_app/zeroclaw-trans.png`}
-            alt="ZeroClaw"
+            src={`${basePath}/ostler-trans.png`}
+            alt="Ostler"
             className="h-20 w-20 rounded-2xl object-cover mx-auto mb-4 animate-float"
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
-          <h1 className="text-2xl font-bold mb-2 text-gradient-blue">ZeroClaw</h1>
+          <h1 className="text-2xl font-bold mb-2 text-gradient-blue">Ostler</h1>
           <p className="text-sm" style={{ color: 'var(--pc-text-muted)' }}>
-            {displayCode ? 'Your pairing code — click Pair to connect' : 'Enter the pairing code from your terminal'}
+            {displayCode ? t('app.pairing_subtitle_code_ready') : t('app.pairing_subtitle_enter_code')}
           </p>
         </div>
 
@@ -187,10 +187,67 @@ function PairingDialog({ onPair }: { onPair: (code: string) => Promise<void> }) 
   );
 }
 
+// Hook: poll the gateway /health endpoint until it responds, so the bundled
+// Tauri shell can wait for the launchd-managed Hub service to come online
+// after the user opens the .app fresh.
+function useGatewayReady(): { ready: boolean; attempts: number } {
+  const [ready, setReady] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const probe = async () => {
+      try {
+        await getPublicHealth();
+        if (!cancelled) setReady(true);
+      } catch {
+        if (!cancelled) {
+          setAttempts((n) => n + 1);
+        }
+      }
+    };
+
+    probe();
+    const interval = setInterval(() => {
+      if (!cancelled && !ready) probe();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [ready]);
+
+  return { ready, attempts };
+}
+
+function HubStartingScreen({ attempts }: { attempts: number }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--pc-bg-base)' }}>
+      <div className="flex flex-col items-center gap-4 animate-fade-in text-center">
+        <img
+          src={`${basePath}/ostler-trans.png`}
+          alt="Ostler"
+          className="h-16 w-16 rounded-2xl object-cover mb-2"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+        <div className="h-10 w-10 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--pc-border)', borderTopColor: 'var(--pc-accent)' }} />
+        <p className="text-sm font-medium" style={{ color: 'var(--pc-text-primary)' }}>{t('app.hub_starting')}</p>
+        <p className="text-xs max-w-xs" style={{ color: 'var(--pc-text-muted)' }}>{t('app.hub_starting_hint')}</p>
+        {attempts > 4 && (
+          <p className="text-xs opacity-60" style={{ color: 'var(--pc-text-muted)' }}>Attempt {attempts}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AppContent() {
   const { isAuthenticated, requiresPairing, loading, pair, logout } = useAuth();
   const [locale, setLocaleState] = useState(loadLocale());
   const draftStore = useDraftStore();
+  const { ready: gatewayReady, attempts: gatewayAttempts } = useGatewayReady();
   setLocale(locale as Locale);
 
   const setAppLocale = (newLocale: string) => {
@@ -204,9 +261,13 @@ function AppContent() {
     const handler = () => {
       logout();
     };
-    window.addEventListener('zeroclaw-unauthorized', handler);
-    return () => window.removeEventListener('zeroclaw-unauthorized', handler);
+    window.addEventListener('ostler-unauthorized', handler);
+    return () => window.removeEventListener('ostler-unauthorized', handler);
   }, [logout]);
+
+  if (!gatewayReady) {
+    return <HubStartingScreen attempts={gatewayAttempts} />;
+  }
 
   if (loading) {
     return (

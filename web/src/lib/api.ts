@@ -50,7 +50,7 @@ export async function apiFetch<T = unknown>(
 
   if (response.status === 401) {
     clearToken();
-    window.dispatchEvent(new Event('zeroclaw-unauthorized'));
+    window.dispatchEvent(new Event('ostler-unauthorized'));
     throw new UnauthorizedError();
   }
 
@@ -82,7 +82,7 @@ function unwrapField<T>(value: T | Record<string, T>, key: string): T {
 // ---------------------------------------------------------------------------
 
 export async function pair(code: string): Promise<{ token: string }> {
-  const response = await fetch(`${basePath}/pair`, {
+  const response = await fetch(`${apiOrigin}${basePath}/pair`, {
     method: 'POST',
     headers: { 'X-Pairing-Code': code },
   });
@@ -100,12 +100,12 @@ export async function pair(code: string): Promise<{ token: string }> {
 export async function getAdminPairCode(): Promise<{ pairing_code: string | null; pairing_required: boolean }> {
   // Use the public /pair/code endpoint which works in Docker and remote environments
   // (no localhost restriction). Falls back to the admin endpoint for backward compat.
-  const publicResp = await fetch(`${basePath}/pair/code`);
+  const publicResp = await fetch(`${apiOrigin}${basePath}/pair/code`);
   if (publicResp.ok) {
     return publicResp.json() as Promise<{ pairing_code: string | null; pairing_required: boolean }>;
   }
 
-  const response = await fetch('/admin/paircode');
+  const response = await fetch(`${apiOrigin}/admin/paircode`);
   if (!response.ok) {
     throw new Error(`Failed to fetch pairing code (${response.status})`);
   }
@@ -117,7 +117,7 @@ export async function getAdminPairCode(): Promise<{ pairing_code: string | null;
 // ---------------------------------------------------------------------------
 
 export async function getPublicHealth(): Promise<{ require_pairing: boolean; paired: boolean }> {
-  const response = await fetch(`${basePath}/health`);
+  const response = await fetch(`${apiOrigin}${basePath}/health`);
   if (!response.ok) {
     throw new Error(`Health check failed (${response.status})`);
   }

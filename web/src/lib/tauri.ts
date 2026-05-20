@@ -1,4 +1,8 @@
-// Tauri detection utilities for ZeroClaw Desktop.
+// Tauri detection utilities for the Ostler Hub desktop shell.
+//
+// The window globals are still named with the legacy `__ZEROCLAW_*` prefix
+// because the gateway injects them by that name; renaming requires a
+// coordinated change on the gateway template side.
 
 declare global {
   interface Window {

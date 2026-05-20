@@ -1,6 +1,6 @@
 {
   "identifier": "mobile",
-  "description": "Mobile-specific permissions for ZeroClaw",
+  "description": "Mobile-specific permissions for Ostler Hub",
   "windows": ["main"],
   "permissions": [
     "core:default"

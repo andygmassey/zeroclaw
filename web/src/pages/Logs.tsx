@@ -248,10 +248,10 @@ export default function Logs() {
         <div className="flex items-start gap-3 px-6 py-3 border-b flex-shrink-0" style={{ borderColor: 'rgba(56, 189, 248, 0.2)', background: 'rgba(56, 189, 248, 0.05)' }}>
           <div className="flex-1 text-xs" style={{ color: 'var(--pc-text-secondary)' }}>
             <span className="font-semibold" style={{ color: '#38bdf8' }}>What appears here: </span>
-            agent activity over SSE — LLM requests, tool calls, agent start/end, and errors.
+            agent activity over SSE: LLM requests, tool calls, agent start/end, and errors.
             {' '}<span className="font-semibold" style={{ color: 'var(--pc-text-muted)' }}>What does not: </span>
             daemon stdout and <code>RUST_LOG</code> tracing output go to the terminal or log file, not this stream.
-            {' '}To see tracing logs, run the daemon with <code>RUST_LOG=info zeroclaw</code> and check your terminal.
+            {' '}To see tracing logs, run the daemon with <code>RUST_LOG=info ostler-assistant</code> and check your terminal.
           </div>
           <button
             onClick={() => setInfoDismissed(true)}

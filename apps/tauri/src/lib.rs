@@ -1,4 +1,4 @@
-//! ZeroClaw Desktop — Tauri application library.
+//! Ostler Hub desktop - Tauri application library.
 
 pub mod commands;
 pub mod gateway_client;
@@ -23,7 +23,7 @@ async fn auto_pair(state: &state::SharedState) -> Option<String> {
 
     // Check if gateway is reachable and requires pairing.
     if !client.requires_pairing().await.unwrap_or(false) {
-        return None; // Pairing disabled — no token needed.
+        return None; // Pairing disabled, no token needed.
     }
 
     // Check if we already have a valid token in state.
@@ -37,7 +37,7 @@ async fn auto_pair(state: &state::SharedState) -> Option<String> {
         }
     }
 
-    // No valid token — auto-pair by requesting a new code and exchanging it.
+    // No valid token: auto-pair by requesting a new code and exchanging it.
     let client = GatewayClient::new(&url, None);
     match client.auto_pair().await {
         Ok(token) => {
