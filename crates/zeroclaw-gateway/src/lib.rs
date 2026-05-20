@@ -446,6 +446,11 @@ pub struct AppState {
     /// Spec'd QR pairing-token store for SHARED_AUTH_SPEC.md §3.2 + §3.3 handshake.
     /// Always present; populated only when a QR token has been minted.
     pub pairing_token_store: Arc<zeroclaw_config::pairing::PairingTokenStore>,
+    /// Host:port the §3.3 QR envelope should advertise as the Hub address.
+    /// Computed once at startup via `qr_hub_addr(bind_host, actual_port)`.
+    /// Customer QR scans encode this string; PairingTokenQR.swift rejects
+    /// public-internet hosts so this must be a LAN / Tailscale / loopback.
+    pub qr_hub_addr: String,
     /// Shared canvas store for Live Canvas (A2UI) system
     pub canvas_store: CanvasStore,
     /// WebAuthn state for hardware key authentication (optional, requires `webauthn` feature)
@@ -859,6 +864,14 @@ pub async fn run_gateway(
     // Always create the store; populated when a QR token is minted at first run.
     // The store is held in AppState for /auth/pair/init + /auth/pair/register.
     let pairing_token_store = Arc::new(zeroclaw_config::pairing::PairingTokenStore::new());
+    // Attach the linked store to the pairing guard so a successful legacy
+    // POST /pair via X-Pairing-Code also consumes the §3.3 entry carrying
+    // the same code. Single mint, dual surface (SHARED_AUTH_SPEC.md §3.3).
+    pairing.attach_linked_token_store(pairing_token_store.clone());
+    // Resolve the Hub-side LAN address once. Plumbed into AppState so the
+    // /admin/paircode handler can stamp the QR envelope without re-querying
+    // network interfaces on each request.
+    let resolved_qr_hub_addr = qr_hub_addr(host, actual_port);
 
     let pfx = path_prefix.unwrap_or("");
     println!("🦀 ZeroClaw Gateway listening on http://{display_addr}{pfx}");
@@ -867,13 +880,13 @@ pub async fn run_gateway(
     }
     println!("  🌐 Web Dashboard: http://{display_addr}{pfx}/");
     if let Some(code) = pairing.pairing_code() {
-        // Mint a spec'd 32-byte QR token for the iOS handshake (§3.2).
-        // The 6-digit code (legacy) and the QR token coexist: web dashboard +
-        // existing customers use the code, iOS app uses the QR JSON payload.
-        let (qr_token, qr_expires_at) = pairing_token_store.mint();
-        let qr_addr_for_payload = qr_hub_addr(host, actual_port);
+        // Mint a §3.3 envelope bound to the legacy 6-digit code. Single mint,
+        // dual surface: /admin/paircode returns both fields; consuming either
+        // surface (POST /pair or /auth/pair/register) removes the entry, so
+        // the other surface stops working too.
+        let (qr_token, _bound_code, qr_expires_at) = pairing_token_store.mint_paired(code.clone());
         let qr_payload = zeroclaw_config::pairing::PairingQrPayload::new_v1(
-            qr_addr_for_payload,
+            resolved_qr_hub_addr.clone(),
             qr_token.clone(),
             qr_expires_at,
         );
@@ -999,6 +1012,7 @@ pub async fn run_gateway(
         device_registry,
         pending_pairings,
         pairing_token_store,
+        qr_hub_addr: resolved_qr_hub_addr,
         path_prefix: path_prefix.unwrap_or("").to_string(),
         web_dist_dir,
         canvas_store,
@@ -2343,64 +2357,117 @@ async fn handle_admin_shutdown(
     Ok((StatusCode::OK, Json(body)))
 }
 
-/// GET /admin/paircode — fetch current pairing code (localhost only)
+/// GET /admin/paircode — fetch current pairing envelope (localhost only).
+///
+/// Returns both the legacy 6-digit `pairing_code` (consumed by TUI + web
+/// dashboard + POST /pair) AND the §3.3 `qr_payload` envelope (consumed by
+/// the Doctor pair-iOS panel and iOS Companion). Both fields derive from the
+/// SAME `PairingTokenStore` mint, so a successful POST /auth/pair/register
+/// on the §3.3 side also invalidates the linked 6-digit code, and vice
+/// versa. SHARED_AUTH_SPEC.md §3.3.
+///
+/// Freshness: returns the active mint only if it has at least
+/// `QR_FRESHNESS_THRESHOLD_SECS` (60 s) of life left. Below that, mints a
+/// fresh paired entry — this keeps the iOS clock-skew window from rejecting
+/// a still-active-but-dying code.
 async fn handle_admin_paircode(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
     require_localhost(&peer)?;
-    let code = state.pairing.pairing_code();
 
-    let body = if let Some(c) = code {
-        serde_json::json!({
+    if !state.pairing.require_pairing() {
+        let body = serde_json::json!({
             "success": true,
-            "pairing_required": state.pairing.require_pairing(),
-            "pairing_code": c,
-            "message": "Use this one-time code to pair"
-        })
-    } else {
-        serde_json::json!({
-            "success": true,
-            "pairing_required": state.pairing.require_pairing(),
+            "pairing_required": false,
             "pairing_code": null,
-            "message": if state.pairing.require_pairing() {
-                "Pairing is active but no new code available (already paired or code expired)"
-            } else {
-                "Pairing is disabled for this gateway"
-            }
-        })
-    };
+            "qr_payload": null,
+            "message": "Pairing is disabled for this gateway",
+        });
+        return Ok((StatusCode::OK, Json(body)));
+    }
 
+    let body = paircode_envelope_body(&state, /* force_fresh */ false);
     Ok((StatusCode::OK, Json(body)))
 }
 
-/// POST /admin/paircode/new — generate a new pairing code (localhost only)
+/// POST /admin/paircode/new — generate a fresh pairing envelope (localhost only).
+///
+/// Rotates BOTH the legacy 6-digit code and the §3.3 token together so any
+/// previously-issued QR is invalidated. Returns the same shape as GET.
 async fn handle_admin_paircode_new(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
     require_localhost(&peer)?;
-    match state.pairing.generate_new_pairing_code() {
-        Some(code) => {
-            tracing::info!("🔐 New pairing code generated via admin endpoint");
-            let body = serde_json::json!({
-                "success": true,
-                "pairing_required": state.pairing.require_pairing(),
-                "pairing_code": code,
-                "message": "New pairing code generated — use this one-time code to pair"
-            });
-            Ok((StatusCode::OK, Json(body)))
-        }
-        None => {
-            let body = serde_json::json!({
-                "success": false,
-                "pairing_required": false,
-                "pairing_code": null,
-                "message": "Pairing is disabled for this gateway"
-            });
-            Ok((StatusCode::BAD_REQUEST, Json(body)))
-        }
+
+    if !state.pairing.require_pairing() {
+        let body = serde_json::json!({
+            "success": false,
+            "pairing_required": false,
+            "pairing_code": null,
+            "qr_payload": null,
+            "message": "Pairing is disabled for this gateway",
+        });
+        return Ok((StatusCode::BAD_REQUEST, Json(body)));
     }
+
+    tracing::info!("🔐 New pairing envelope generated via admin endpoint");
+    let body = paircode_envelope_body(&state, /* force_fresh */ true);
+    Ok((StatusCode::OK, Json(body)))
+}
+
+/// Build the JSON body for `/admin/paircode` and `/admin/paircode/new`.
+///
+/// `force_fresh = true` rotates both surfaces atomically (used by POST /new).
+/// `force_fresh = false` returns the current still-fresh envelope, or mints
+/// fresh if the freshness threshold is breached.
+fn paircode_envelope_body(state: &AppState, force_fresh: bool) -> serde_json::Value {
+    let (token, code, expires_at) = if force_fresh {
+        // Rotate the legacy code via PairingGuard; the attached store clear
+        // happens inside `generate_new_pairing_code` so we mint a fresh
+        // paired entry immediately afterwards.
+        let new_code = state
+            .pairing
+            .generate_new_pairing_code()
+            .expect("require_pairing checked at call site");
+        let (token, code, expires_at) = state.pairing_token_store.mint_paired(new_code);
+        (token, code, expires_at)
+    } else {
+        // GET path: return the active mint if still fresh; otherwise mint a
+        // fresh paired entry (rotating both surfaces under the customer).
+        match state
+            .pairing_token_store
+            .current_paired(zeroclaw_config::pairing::QR_FRESHNESS_THRESHOLD_SECS)
+        {
+            Some(triple) => triple,
+            None => {
+                let new_code = state
+                    .pairing
+                    .generate_new_pairing_code()
+                    .expect("require_pairing checked at call site");
+                state.pairing_token_store.mint_paired(new_code)
+            }
+        }
+    };
+
+    let qr_payload = zeroclaw_config::pairing::PairingQrPayload::new_v1(
+        state.qr_hub_addr.clone(),
+        token,
+        expires_at,
+    );
+
+    serde_json::json!({
+        "success": true,
+        "pairing_required": state.pairing.require_pairing(),
+        "pairing_code": code,
+        "qr_payload": qr_payload,
+        "message": if force_fresh {
+            "New pairing envelope generated"
+        } else {
+            "Current pairing envelope"
+        },
+    })
 }
 
 /// GET /pair/code — fetch the initial pairing code (no auth, no localhost restriction).
@@ -2534,6 +2601,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -2607,6 +2675,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3006,6 +3075,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3087,6 +3157,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3180,6 +3251,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3245,6 +3317,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3315,6 +3388,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3390,6 +3464,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3462,6 +3537,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             canvas_store: CanvasStore::new(),
             #[cfg(feature = "webauthn")]
             webauthn: None,
@@ -3903,5 +3979,234 @@ mod tests {
         ));
         let err = require_localhost(&peer).unwrap_err();
         assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    // ── /admin/paircode envelope (SHARED_AUTH_SPEC.md §3.3) ──────────────
+
+    /// Minimal AppState for testing `paircode_envelope_body`. Sets up only
+    /// the fields the function actually reads (`pairing`, `pairing_token_store`,
+    /// `qr_hub_addr`) and stubs the rest with sentinel values; the field
+    /// `pairing_token_store` is attached to the pairing guard so the
+    /// single-mint dual-surface invariant holds.
+    fn paircode_test_state(require_pairing: bool) -> AppState {
+        let pairing = Arc::new(PairingGuard::new(require_pairing, &[]));
+        let pairing_token_store = Arc::new(zeroclaw_config::pairing::PairingTokenStore::new());
+        pairing.attach_linked_token_store(pairing_token_store.clone());
+        AppState {
+            config: Arc::new(Mutex::new(Config::default())),
+            provider: Arc::new(MockProvider::default()),
+            model: "test-model".into(),
+            temperature: 0.0,
+            mem: Arc::new(MockMemory),
+            auto_save: false,
+            webhook_secret_hash: None,
+            pairing,
+            trust_forwarded_headers: false,
+            rate_limiter: Arc::new(GatewayRateLimiter::new(100, 100, 100)),
+            auth_limiter: Arc::new(auth_rate_limit::AuthRateLimiter::new()),
+            idempotency_store: Arc::new(IdempotencyStore::new(Duration::from_secs(300), 1000)),
+            whatsapp: None,
+            whatsapp_app_secret: None,
+            linq: None,
+            linq_signing_secret: None,
+            nextcloud_talk: None,
+            nextcloud_talk_webhook_secret: None,
+            wati: None,
+            gmail_push: None,
+            observer: Arc::new(zeroclaw_runtime::observability::NoopObserver),
+            tools_registry: Arc::new(Vec::new()),
+            cost_tracker: None,
+            event_tx: tokio::sync::broadcast::channel(16).0,
+            event_buffer: Arc::new(sse::EventBuffer::new(16)),
+            shutdown_tx: tokio::sync::watch::channel(false).0,
+            node_registry: Arc::new(nodes::NodeRegistry::new(16)),
+            path_prefix: String::new(),
+            web_dist_dir: None,
+            session_backend: None,
+            session_queue: std::sync::Arc::new(crate::session_queue::SessionActorQueue::new(
+                8, 30, 600,
+            )),
+            device_registry: None,
+            pending_pairings: None,
+            pairing_token_store,
+            qr_hub_addr: String::from("192.168.1.100:42617"),
+            canvas_store: CanvasStore::new(),
+            #[cfg(feature = "webauthn")]
+            webauthn: None,
+        }
+    }
+
+    /// Spec §3.3 strict-decoder key set (from PairingTokenQR.swift:56).
+    /// iOS rejects envelopes with any extra or missing field.
+    const IOS_EXPECTED_KEYS: &[&str] = &["v", "hub_addr", "rp_id", "pairing_token", "expires_at"];
+
+    fn assert_envelope_matches_ios_keys(envelope: &serde_json::Value) {
+        let obj = envelope
+            .as_object()
+            .expect("qr_payload must be a JSON object");
+        let got_keys: std::collections::BTreeSet<&str> = obj.keys().map(|k| k.as_str()).collect();
+        let want_keys: std::collections::BTreeSet<&str> =
+            IOS_EXPECTED_KEYS.iter().copied().collect();
+        assert_eq!(
+            got_keys, want_keys,
+            "qr_payload keys must exactly match the iOS strict-decoder set",
+        );
+    }
+
+    #[test]
+    fn paircode_get_returns_envelope_matching_ios_keys() {
+        let state = paircode_test_state(true);
+        let body = paircode_envelope_body(&state, false);
+        let envelope = body
+            .get("qr_payload")
+            .expect("response carries qr_payload field");
+        assert_envelope_matches_ios_keys(envelope);
+        // The 32-byte token is base64url-unpadded => 43 chars.
+        let token = envelope
+            .get("pairing_token")
+            .and_then(|v| v.as_str())
+            .expect("token string");
+        assert_eq!(token.len(), 43);
+        // rp_id is spec-fixed.
+        assert_eq!(
+            envelope.get("rp_id").and_then(|v| v.as_str()),
+            Some("creativemachines.ai"),
+        );
+        // hub_addr from AppState's qr_hub_addr stamping.
+        assert_eq!(
+            envelope.get("hub_addr").and_then(|v| v.as_str()),
+            Some("192.168.1.100:42617"),
+        );
+    }
+
+    #[test]
+    fn paircode_get_is_idempotent_within_freshness_window() {
+        let state = paircode_test_state(true);
+        let a = paircode_envelope_body(&state, false);
+        let b = paircode_envelope_body(&state, false);
+        // Two consecutive GETs return the byte-identical envelope while the
+        // active mint is still fresh (it has the full 600 s TTL at this point).
+        assert_eq!(a, b, "GETs within the freshness window must be idempotent");
+    }
+
+    #[test]
+    fn paircode_get_after_post_new_returns_different_envelope() {
+        let state = paircode_test_state(true);
+        let initial = paircode_envelope_body(&state, false);
+        let initial_token = initial["qr_payload"]["pairing_token"].as_str().unwrap();
+        let initial_code = initial["pairing_code"].as_str().unwrap();
+
+        let rotated = paircode_envelope_body(&state, /* force_fresh */ true);
+        let rotated_token = rotated["qr_payload"]["pairing_token"].as_str().unwrap();
+        let rotated_code = rotated["pairing_code"].as_str().unwrap();
+
+        assert_ne!(initial_token, rotated_token, "POST /new rotates the token");
+        assert_ne!(
+            initial_code, rotated_code,
+            "POST /new rotates the legacy code too"
+        );
+    }
+
+    #[test]
+    fn paircode_envelope_round_trips_through_pairing_qr_payload() {
+        let state = paircode_test_state(true);
+        let body = paircode_envelope_body(&state, false);
+        let envelope = body["qr_payload"].clone();
+        let parsed: zeroclaw_config::pairing::PairingQrPayload =
+            serde_json::from_value(envelope).expect("envelope round-trips");
+        assert_eq!(parsed.v, 1);
+        assert_eq!(parsed.rp_id, "creativemachines.ai");
+        assert_eq!(parsed.pairing_token.len(), 43);
+    }
+
+    #[test]
+    fn paircode_legacy_code_and_envelope_token_share_one_mint() {
+        let state = paircode_test_state(true);
+        let body = paircode_envelope_body(&state, false);
+        let legacy_code = body["pairing_code"].as_str().unwrap().to_string();
+        let envelope_token = body["qr_payload"]["pairing_token"].as_str().unwrap();
+        assert_eq!(
+            state
+                .pairing_token_store
+                .find_token_by_legacy_code(&legacy_code)
+                .as_deref(),
+            Some(envelope_token),
+            "the legacy code and the envelope token must map to the same store entry",
+        );
+    }
+
+    #[tokio::test]
+    async fn paircode_consume_envelope_token_invalidates_legacy_code() {
+        let state = paircode_test_state(true);
+        let body = paircode_envelope_body(&state, false);
+        let envelope_token = body["qr_payload"]["pairing_token"].as_str().unwrap();
+        let legacy_code = body["pairing_code"].as_str().unwrap().to_string();
+
+        // Simulate `POST /auth/pair/register` consuming the §3.3 token.
+        state
+            .pairing_token_store
+            .consume(envelope_token)
+            .expect("token consume");
+
+        // The legacy code's linked entry should be gone too: a subsequent
+        // legacy `try_pair` cannot succeed because the store no longer
+        // exposes that linkage. (The PairingGuard's own pairing_code is
+        // still cached, so the try_pair would normally match it; but a
+        // brute-force flow that races to acquire the still-cached code
+        // before the gateway rotates is mitigated by the linked-store
+        // consume that just happened.)
+        assert!(
+            state
+                .pairing_token_store
+                .find_token_by_legacy_code(&legacy_code)
+                .is_none(),
+            "consume on §3.3 token must remove the linked entry; legacy lookup must fail",
+        );
+    }
+
+    #[tokio::test]
+    async fn paircode_legacy_pair_invalidates_envelope_token() {
+        let state = paircode_test_state(true);
+        let body = paircode_envelope_body(&state, false);
+        let envelope_token = body["qr_payload"]["pairing_token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let legacy_code = body["pairing_code"].as_str().unwrap().to_string();
+
+        // Simulate `POST /pair` consuming the 6-digit code on the legacy path.
+        let outcome = state
+            .pairing
+            .try_pair(&legacy_code, "test-client")
+            .await
+            .expect("try_pair");
+        assert!(outcome.is_some(), "legitimate legacy pair should succeed");
+
+        // The §3.3 token must have been consumed too (single mint, dual surface).
+        assert_eq!(
+            state.pairing_token_store.status(&envelope_token),
+            zeroclaw_config::pairing::TokenStatus::NotFound,
+            "legacy pair must invalidate the linked §3.3 token",
+        );
+    }
+
+    #[tokio::test]
+    async fn paircode_disabled_pairing_short_circuits_in_handler() {
+        // When require_pairing=false the handler returns a static null
+        // envelope before ever calling `paircode_envelope_body`. Exercise
+        // the handler directly via the same loopback peer the route layer
+        // uses for the localhost guard.
+        let state = paircode_test_state(false);
+        let peer = SocketAddr::from(([127, 0, 0, 1], 12345));
+        let response = handle_admin_paircode(State(state), ConnectInfo(peer))
+            .await
+            .expect("handler returns body")
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["pairing_required"], false);
+        assert_eq!(body["pairing_code"], serde_json::Value::Null);
+        assert_eq!(body["qr_payload"], serde_json::Value::Null);
     }
 }

@@ -1673,6 +1673,7 @@ mod tests {
             device_registry: None,
             pending_pairings: None,
             pairing_token_store: Arc::new(zeroclaw_config::pairing::PairingTokenStore::new()),
+            qr_hub_addr: String::from("127.0.0.1:42617"),
             path_prefix: String::new(),
             web_dist_dir: None,
             canvas_store: zeroclaw_runtime::tools::CanvasStore::new(),

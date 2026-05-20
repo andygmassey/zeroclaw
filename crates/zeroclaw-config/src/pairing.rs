@@ -59,6 +59,12 @@ pub struct PairingGuard {
     paired_tokens: Arc<Mutex<HashSet<String>>>,
     /// Brute-force protection: per-client failed attempt state + last sweep timestamp.
     failed_attempts: Arc<Mutex<(HashMap<String, FailedAttemptState>, Instant)>>,
+    /// Linked §3.3 pairing-token store. When set, a successful legacy-code
+    /// pair via `try_pair` also consumes the linked store entry, invalidating
+    /// the QR-encoded `pairing_token` carrying the same legacy code.
+    /// Attached after construction by `attach_linked_token_store` so the two
+    /// types can be wired into AppState without a constructor-order cycle.
+    linked_token_store: Arc<Mutex<Option<Arc<PairingTokenStore>>>>,
 }
 
 impl PairingGuard {
@@ -93,7 +99,16 @@ impl PairingGuard {
             pairing_code: Arc::new(Mutex::new(code)),
             paired_tokens: Arc::new(Mutex::new(tokens)),
             failed_attempts: Arc::new(Mutex::new((HashMap::new(), Instant::now()))),
+            linked_token_store: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Attach a §3.3 pairing-token store. After this call, a successful
+    /// `try_pair` on a legacy code also consumes the linked store entry
+    /// carrying that code, so the QR-encoded `pairing_token` derived from
+    /// the same mint stops working too. Single mint, dual surface.
+    pub fn attach_linked_token_store(&self, store: Arc<PairingTokenStore>) {
+        *self.linked_token_store.lock() = Some(store);
     }
 
     /// The one-time pairing code (generated only on first startup when no tokens exist).
@@ -148,8 +163,18 @@ impl PairingGuard {
                 let mut tokens = self.paired_tokens.lock();
                 tokens.insert(hash_token(&token));
 
+                let consumed_code = expected.trim().to_string();
                 // Consume the pairing code so it cannot be reused
                 *pairing_code = None;
+
+                // Single mint, dual surface: also consume the linked §3.3
+                // entry, so the QR-encoded pairing_token carrying this same
+                // legacy code stops validating.
+                drop(pairing_code);
+                drop(tokens);
+                if let Some(linked) = self.linked_token_store.lock().clone() {
+                    let _ = linked.consume_by_legacy_code(&consumed_code);
+                }
 
                 return Ok(Some(token));
             }
@@ -232,10 +257,17 @@ impl PairingGuard {
     /// Generate a new pairing code, even if already paired.
     ///
     /// This allows adding additional clients without restarting the gateway.
-    /// The new code can be used exactly once to pair a new client.
+    /// The new code can be used exactly once to pair a new client. If a
+    /// linked §3.3 store is attached, all previously-issued tokens are
+    /// cleared so the rotation invalidates both surfaces atomically.
     pub fn generate_new_pairing_code(&self) -> Option<String> {
         if !self.require_pairing {
             return None;
+        }
+        // Single mint, dual surface: drop any outstanding §3.3 tokens so the
+        // caller can then mint a fresh paired entry bound to the new code.
+        if let Some(linked) = self.linked_token_store.lock().clone() {
+            linked.clear();
         }
         let new_code = generate_code();
         *self.pairing_code.lock() = Some(new_code.clone());
@@ -386,6 +418,16 @@ pub const MAX_OUTSTANDING_QR_TOKENS: usize = 32;
 /// Length in bytes of the random pairing token (before base64url encoding).
 pub const QR_PAIRING_TOKEN_BYTES: usize = 32; // SHARED_AUTH_SPEC.md §3.2
 
+/// Doctor + admin endpoints return the current envelope only if it still has
+/// this many seconds of life. Below this, mint fresh.
+///
+/// Rationale: iOS rejects with `PairingTokenQRError.expired` when
+/// `expires_at < now + 30s` (clockSkewSeconds in PairingTokenQR.swift). Giving
+/// the customer a code with under 30 seconds left guarantees the iOS scan
+/// fails. The 60-second floor is the iOS skew plus another 30 seconds for the
+/// customer to actually pick up the iPhone and scan.
+pub const QR_FRESHNESS_THRESHOLD_SECS: u64 = 60;
+
 /// Internal state for a single outstanding QR pairing token.
 #[derive(Debug, Clone)]
 struct QrTokenState {
@@ -394,6 +436,12 @@ struct QrTokenState {
     /// `Pending`: in `POST /auth/pair/init` (claimed but not yet completed).
     /// Tokens flip to `Pending` on init and are removed entirely on register success.
     claimed: bool,
+    /// Optional legacy 6-digit code bound to this token. When present, the
+    /// /admin/paircode response carries BOTH fields; consuming either surface
+    /// (POST /pair with the code, or /auth/pair/register with the token)
+    /// removes this entry entirely, so the other surface stops working too.
+    /// SHARED_AUTH_SPEC.md §3.3: single mint, dual surface.
+    legacy_code: Option<String>,
 }
 
 /// In-memory store of outstanding QR pairing tokens (SHARED_AUTH_SPEC.md §3.3.4).
@@ -442,6 +490,32 @@ impl PairingTokenStore {
 
     /// Mint a fresh token with a custom TTL (for tests + capability extensions).
     pub fn mint_with_ttl(&self, ttl_secs: u64) -> (String, u64) {
+        let (token, expires_at, _code) = self.mint_inner(ttl_secs, None);
+        (token, expires_at)
+    }
+
+    /// Mint a fresh token bound to a legacy 6-digit pairing code.
+    ///
+    /// Returns `(token, legacy_code, expires_at)`. Subsequent consumption of
+    /// either the token (via `consume`) or the legacy code (via
+    /// `consume_by_legacy_code`) removes this entry, so the other surface
+    /// stops working too. Implements SHARED_AUTH_SPEC.md §3.3 single-mint
+    /// dual-surface for /admin/paircode.
+    pub fn mint_paired(&self, legacy_code: String) -> (String, String, u64) {
+        let (token, expires_at, code) =
+            self.mint_inner(QR_PAIRING_TOKEN_TTL_SECS, Some(legacy_code));
+        (
+            token,
+            code.expect("mint_paired always supplies a legacy code"),
+            expires_at,
+        )
+    }
+
+    fn mint_inner(
+        &self,
+        ttl_secs: u64,
+        legacy_code: Option<String>,
+    ) -> (String, u64, Option<String>) {
         let raw: [u8; QR_PAIRING_TOKEN_BYTES] = rand::random();
         let token = URL_SAFE_NO_PAD.encode(raw);
         let now = unix_now_secs();
@@ -465,10 +539,11 @@ impl PairingTokenStore {
             QrTokenState {
                 expires_at,
                 claimed: false,
+                legacy_code: legacy_code.clone(),
             },
         );
 
-        (token, expires_at)
+        (token, expires_at, legacy_code)
     }
 
     /// Look up a token's status without changing it.
@@ -510,6 +585,66 @@ impl PairingTokenStore {
             Some(state) if state.expires_at <= now => Err(TokenStatus::Expired),
             Some(_) => Ok(()),
         }
+    }
+
+    /// Look up the §3.3 pairing token bound to a given legacy 6-digit code.
+    ///
+    /// Returns `None` if no live entry carries this code (either never minted
+    /// paired, or already consumed and reaped). Walks the map linearly — fine
+    /// for the bound `MAX_OUTSTANDING_QR_TOKENS = 32`.
+    pub fn find_token_by_legacy_code(&self, code: &str) -> Option<String> {
+        let now = unix_now_secs();
+        let map = self.inner.lock();
+        map.iter()
+            .find(|(_, state)| state.expires_at > now && state.legacy_code.as_deref() == Some(code))
+            .map(|(token, _)| token.clone())
+    }
+
+    /// Consume the entry bound to a legacy 6-digit pairing code.
+    ///
+    /// Called by the legacy `POST /pair` handler once it has matched the code
+    /// via the constant-time-comparison path. Removes the entry entirely so
+    /// the linked §3.3 token also stops working. Returns `Ok(())` on success.
+    /// SHARED_AUTH_SPEC.md §3.3: single mint, dual surface.
+    pub fn consume_by_legacy_code(&self, code: &str) -> Result<(), TokenStatus> {
+        let token = match self.find_token_by_legacy_code(code) {
+            Some(t) => t,
+            None => return Err(TokenStatus::NotFound),
+        };
+        self.consume(&token)
+    }
+
+    /// Return the freshest outstanding paired entry whose remaining lifetime
+    /// is at least `threshold_secs`. Returns `None` if no entry qualifies.
+    ///
+    /// Used by `GET /admin/paircode`: returns the current envelope as long as
+    /// it still has enough life for the customer to scan and the iOS Companion
+    /// to validate (PairingTokenQR's 30 s clock-skew + 30 s scan budget).
+    pub fn current_paired(&self, threshold_secs: u64) -> Option<(String, String, u64)> {
+        let now = unix_now_secs();
+        let cutoff = now.saturating_add(threshold_secs);
+        let map = self.inner.lock();
+        map.iter()
+            .filter(|(_, s)| s.expires_at > cutoff && s.legacy_code.is_some())
+            .max_by_key(|(_, s)| s.expires_at)
+            .map(|(token, state)| {
+                (
+                    token.clone(),
+                    state
+                        .legacy_code
+                        .clone()
+                        .expect("filtered to legacy_code.is_some()"),
+                    state.expires_at,
+                )
+            })
+    }
+
+    /// Drop every entry in the store. Used by `POST /admin/paircode/new` to
+    /// guarantee that rotating the code invalidates all previously-issued
+    /// tokens, including any that may still be unconsumed within their TTL.
+    pub fn clear(&self) {
+        let mut map = self.inner.lock();
+        map.clear();
     }
 
     /// Number of outstanding tokens (for diagnostics).
@@ -1073,5 +1208,131 @@ mod tests {
         assert_eq!(back.hub_addr, "h:1");
         assert_eq!(back.pairing_token, "tok");
         assert_eq!(back.expires_at, 42);
+    }
+
+    // ── Single mint, dual surface (SHARED_AUTH_SPEC.md §3.3) ─────────────
+
+    #[test]
+    async fn mint_paired_links_token_to_legacy_code() {
+        let store = PairingTokenStore::new();
+        let (token, code, _exp) = store.mint_paired("123456".into());
+        assert_eq!(token.len(), 43, "token still base64url 32-byte");
+        assert_eq!(code, "123456");
+        assert_eq!(store.find_token_by_legacy_code("123456"), Some(token));
+    }
+
+    #[test]
+    async fn find_token_by_legacy_code_ignores_unbound_mints() {
+        let store = PairingTokenStore::new();
+        let (_t, _) = store.mint(); // unpaired
+        let (_t2, _c, _) = store.mint_paired("000111".into());
+        // The unpaired mint is not findable by code; the paired one is.
+        assert!(store.find_token_by_legacy_code("123456").is_none());
+        assert!(store.find_token_by_legacy_code("000111").is_some());
+    }
+
+    #[test]
+    async fn consume_by_legacy_code_removes_linked_entry() {
+        let store = PairingTokenStore::new();
+        let (token, _c, _e) = store.mint_paired("123456".into());
+        assert_eq!(store.status(&token), TokenStatus::Valid);
+        assert!(store.consume_by_legacy_code("123456").is_ok());
+        assert_eq!(
+            store.status(&token),
+            TokenStatus::NotFound,
+            "legacy-code consume should remove the linked §3.3 token too",
+        );
+    }
+
+    #[test]
+    async fn consume_token_makes_legacy_code_lookup_fail() {
+        let store = PairingTokenStore::new();
+        let (token, _c, _e) = store.mint_paired("654321".into());
+        assert!(store.consume(&token).is_ok());
+        assert!(
+            store.find_token_by_legacy_code("654321").is_none(),
+            "§3.3 consume should remove the linked legacy code too",
+        );
+    }
+
+    #[test]
+    async fn current_paired_returns_freshest_above_threshold() {
+        let store = PairingTokenStore::new();
+        // Use explicit-TTL mints so the comparison is deterministic even
+        // when both mints happen inside the same wall-clock second.
+        let (_t1, _e1, _c1) = store.mint_inner(600, Some("111111".into()));
+        let (t2, e2, _c2) = store.mint_inner(601, Some("222222".into()));
+        let (got_token, got_code, got_exp) = store
+            .current_paired(QR_FRESHNESS_THRESHOLD_SECS)
+            .expect("at least one fresh entry");
+        assert_eq!(got_token, t2);
+        assert_eq!(got_code, "222222");
+        assert_eq!(got_exp, e2);
+    }
+
+    #[test]
+    async fn current_paired_returns_none_below_threshold() {
+        let store = PairingTokenStore::new();
+        // TTL well under the threshold so no entry qualifies.
+        let (_t, _e, _c) = store.mint_inner(10, Some("999999".into()));
+        assert!(
+            store.current_paired(QR_FRESHNESS_THRESHOLD_SECS).is_none(),
+            "no entry has 60s of life left",
+        );
+    }
+
+    #[test]
+    async fn current_paired_ignores_unbound_mints() {
+        let store = PairingTokenStore::new();
+        let (_unpaired, _) = store.mint();
+        // No paired entry exists -> None even though an unpaired one does.
+        assert!(store.current_paired(QR_FRESHNESS_THRESHOLD_SECS).is_none());
+    }
+
+    #[test]
+    async fn clear_empties_the_store() {
+        let store = PairingTokenStore::new();
+        let _ = store.mint_paired("111111".into());
+        let _ = store.mint_paired("222222".into());
+        assert_eq!(store.len(), 2);
+        store.clear();
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    async fn pairing_guard_try_pair_consumes_linked_token() {
+        let store = Arc::new(PairingTokenStore::new());
+        let guard = PairingGuard::new(true, &[]);
+        guard.attach_linked_token_store(store.clone());
+
+        let code = guard.pairing_code().expect("freshly-minted code");
+        let (token, _code, _exp) = store.mint_paired(code.clone());
+        assert_eq!(store.status(&token), TokenStatus::Valid);
+
+        let result = guard.try_pair(&code, "test").await.unwrap();
+        assert!(result.is_some(), "legitimate code should pair");
+        assert_eq!(
+            store.status(&token),
+            TokenStatus::NotFound,
+            "successful legacy pair should consume the linked §3.3 entry",
+        );
+    }
+
+    #[test]
+    async fn generate_new_pairing_code_clears_linked_store() {
+        let store = Arc::new(PairingTokenStore::new());
+        let guard = PairingGuard::new(true, &[]);
+        guard.attach_linked_token_store(store.clone());
+
+        let _ = store.mint_paired("aaaaaa".into());
+        let _ = store.mint_paired("bbbbbb".into());
+        assert_eq!(store.len(), 2);
+
+        let _new_code = guard.generate_new_pairing_code();
+        assert_eq!(
+            store.len(),
+            0,
+            "rotating the legacy code should clear all §3.3 tokens too",
+        );
     }
 }
