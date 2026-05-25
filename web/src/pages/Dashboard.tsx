@@ -17,6 +17,7 @@ import type { StatusResponse, CostSummary, Session, ChannelDetail } from '@/type
 import { getStatus, getCost, getSessions, getChannels } from '@/lib/api';
 import { useSSE } from '@/hooks/useSSE';
 import { t } from '@/lib/i18n';
+import { featureFlags } from '@/config/features';
 
 type TabId = 'overview' | 'sessions' | 'channels';
 
@@ -178,7 +179,9 @@ function OverviewTab({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 stagger-children">
-        {/* Cost Widget */}
+        {/* Cost Widget — hidden in v1.0 (local-LLM only, no per-query metering).
+            Returns when v2 cloud-LLM routing lands; gated via featureFlags.v1_show_cost. */}
+        {featureFlags.v1_show_cost && (
         <div className="card p-5 animate-slide-in-up">
           <div className="flex items-center gap-2 mb-5">
             <DollarSign className="h-5 w-5" style={{ color: "var(--pc-accent)" }} />
@@ -247,6 +250,7 @@ function OverviewTab({
             </span>
           </div>
         </div>
+        )}
 
         {/* Active Channels */}
         <div className="card p-5 animate-slide-in-up">

@@ -14,20 +14,25 @@ import {
   Monitor,
 } from 'lucide-react';
 import { t } from '@/lib/i18n';
+import { featureFlags } from '@/config/features';
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
-  { to: '/agent', icon: MessageSquare, labelKey: 'nav.agent' },
-  { to: '/tools', icon: Wrench, labelKey: 'nav.tools' },
-  { to: '/cron', icon: Clock, labelKey: 'nav.cron' },
-  { to: '/integrations', icon: Puzzle, labelKey: 'nav.integrations' },
-  { to: '/memory', icon: Brain, labelKey: 'nav.memory' },
-  { to: '/config', icon: Settings, labelKey: 'nav.config' },
-  { to: '/cost', icon: DollarSign, labelKey: 'nav.cost' },
-  { to: '/logs', icon: Activity, labelKey: 'nav.logs' },
-  { to: '/doctor', icon: Stethoscope, labelKey: 'nav.doctor' },
-  { to: '/canvas', icon: Monitor, labelKey: 'nav.canvas' },
+// Full nav definition. Items are filtered by feature flags at render-time so
+// the code path stays present and reversible — never delete entries here.
+const allNavItems = [
+  { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard', show: true },
+  { to: '/agent', icon: MessageSquare, labelKey: 'nav.agent', show: true },
+  { to: '/tools', icon: Wrench, labelKey: 'nav.tools', show: true },
+  { to: '/cron', icon: Clock, labelKey: 'nav.cron', show: true },
+  { to: '/integrations', icon: Puzzle, labelKey: 'nav.integrations', show: true },
+  { to: '/memory', icon: Brain, labelKey: 'nav.memory', show: true },
+  { to: '/config', icon: Settings, labelKey: 'nav.config', show: true },
+  { to: '/cost', icon: DollarSign, labelKey: 'nav.cost', show: featureFlags.v1_show_cost },
+  { to: '/logs', icon: Activity, labelKey: 'nav.logs', show: true },
+  { to: '/doctor', icon: Stethoscope, labelKey: 'nav.doctor', show: true },
+  { to: '/canvas', icon: Monitor, labelKey: 'nav.canvas', show: featureFlags.v1_show_canvas_in_nav },
 ];
+
+const navItems = allNavItems.filter((item) => item.show);
 
 // Shared nav item sub-component — eliminates duplication between mobile & desktop nav
 function SidebarNavItem({ item, showLabel, showTooltip, onClick }: {
