@@ -32,7 +32,7 @@ export default function Layout() {
   }, [collapsed]);
 
   return (
-    <div className="min-h-screen text-white" style={{ background: 'var(--pc-bg-base)' }}>
+    <div className="min-h-screen" style={{ background: 'var(--chassis)', color: 'var(--ink)' }}>
       {/* Fixed sidebar */}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={collapsed} />
 

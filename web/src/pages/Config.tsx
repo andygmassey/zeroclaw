@@ -79,32 +79,49 @@ export default function Config() {
         </div>
       </div>
 
-      {/* Sensitive fields note */}
-      <div className="flex items-start gap-3 rounded-2xl p-4 border flex-shrink-0" style={{ borderColor: 'rgba(255, 170, 0, 0.2)', background: 'rgba(255, 170, 0, 0.05)' }}>
-        <ShieldAlert className="h-5 w-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--color-status-warning)' }} />
+      {/* Sensitive fields note — V1.1 §3.16 warning note-box variant */}
+      <div className="note-box note-box--warning flex-shrink-0 flex items-start gap-3">
+        <ShieldAlert className="h-5 w-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent-warm-amber)' }} strokeWidth={1.5} />
         <div>
-          <p className="text-sm font-medium" style={{ color: 'var(--color-status-warning)' }}>
+          <p
+            style={{
+              margin: 0,
+              fontFamily: 'var(--f-body)',
+              fontSize: '13px',
+              fontWeight: 500,
+              lineHeight: '20px',
+              color: 'var(--ink)',
+            }}
+          >
             {t('config.sensitive_title')}
           </p>
-          <p className="text-sm mt-0.5" style={{ color: 'rgba(255, 170, 0, 0.7)' }}>
+          <p
+            style={{
+              margin: '2px 0 0',
+              fontFamily: 'var(--f-body)',
+              fontSize: '13px',
+              lineHeight: '20px',
+              color: 'var(--ink-muted)',
+            }}
+          >
             {t('config.sensitive_hint')}
           </p>
         </div>
       </div>
 
-      {/* Success message */}
+      {/* Success message — V1.1 §3.16 success note-box variant */}
       {success && (
-        <div className="flex items-center gap-2 rounded-xl p-3 border animate-fade-in flex-shrink-0" style={{ borderColor: 'rgba(0, 230, 138, 0.2)', background: 'rgba(0, 230, 138, 0.06)' }}>
-          <CheckCircle className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-status-success)' }} />
-          <span className="text-sm" style={{ color: 'var(--color-status-success)' }}>{success}</span>
+        <div className="note-box note-box--success animate-fade-in flex-shrink-0 flex items-center gap-2">
+          <CheckCircle className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--accent-3)' }} strokeWidth={1.5} />
+          <span style={{ fontFamily: 'var(--f-body)', fontSize: '13px', color: 'var(--ink)' }}>{success}</span>
         </div>
       )}
 
-      {/* Error / parse error message */}
+      {/* Error / parse error message — V1.1 §3.16 default note-box variant */}
       {(error || parseError) && (
-        <div className="flex items-center gap-2 rounded-xl p-3 border animate-fade-in flex-shrink-0" style={{ borderColor: 'rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.06)' }}>
-          <AlertTriangle className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-status-error)' }} />
-          <span className="text-sm" style={{ color: 'var(--color-status-error)' }}>{error || parseError}</span>
+        <div className="note-box note-box--default animate-fade-in flex-shrink-0 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--accent)' }} strokeWidth={1.5} />
+          <span style={{ fontFamily: 'var(--f-body)', fontSize: '13px', color: 'var(--ink)' }}>{error || parseError}</span>
         </div>
       )}
 

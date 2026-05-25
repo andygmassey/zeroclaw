@@ -25,9 +25,9 @@ function severityIcon(severity: DiagResult['severity']) {
 function severityBg(severity: DiagResult['severity']): string {
   switch (severity) {
     case 'ok':
-      return 'rgba(0, 230, 138, 0.04)';
+      return 'var(--accent-3-soft)';
     case 'warn':
-      return 'rgba(255, 170, 0, 0.04)';
+      return 'var(--accent-warm-soft)';
     case 'error':
       return 'rgba(239, 68, 68, 0.04)';
   }
@@ -36,11 +36,11 @@ function severityBg(severity: DiagResult['severity']): string {
 function severityBorder(severity: DiagResult['severity']): string {
   switch (severity) {
     case 'ok':
-      return 'border-[rgba(0,230,138,0.3)]';
+      return 'border-[rgba(44, 74, 44, 0.25)]';
     case 'warn':
-      return 'border-[rgba(255,170,0,0.3)]';
+      return 'border-[rgba(139, 101, 0, 0.25)]';
     case 'error':
-      return 'border-[rgba(239,68,68,0.3)]';
+      return 'border-[var(--accent-soft-2)]';
   }
 }
 
@@ -104,7 +104,7 @@ export default function Doctor() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-xl p-4 border animate-fade-in" style={{ background: 'rgba(239,68,68,0.06)', borderColor: 'rgba(239,68,68,0.2)', color: '#f87171' }}>
+        <div className="rounded-xl p-4 border animate-fade-in" style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent-soft-2)', color: 'var(--accent)' }}>
           {error}
         </div>
       )}
@@ -155,15 +155,15 @@ export default function Doctor() {
             {/* Overall indicator */}
             <div className="ml-auto">
               {errorCount > 0 ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border" style={{ background: 'rgba(239,68,68,0.06)', borderColor: 'rgba(239,68,68,0.3)', color: '#f87171' }}>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border" style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent-soft-2)', color: 'var(--accent)' }}>
                   {t('doctor.issues_found')}
                 </span>
               ) : warnCount > 0 ? (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border" style={{ background: 'rgba(255,170,0,0.06)', borderColor: 'rgba(255,170,0,0.3)', color: '#fbbf24' }}>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border" style={{ background: 'var(--accent-warm-soft)', borderColor: 'rgba(139, 101, 0, 0.25)', color: 'var(--accent-warm-amber)' }}>
                   {t('doctor.warnings_summary')}
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border" style={{ background: 'rgba(0,230,138,0.06)', borderColor: 'rgba(0,230,138,0.3)', color: '#34d399' }}>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border" style={{ background: 'var(--accent-3-soft)', borderColor: 'rgba(44, 74, 44, 0.25)', color: 'var(--accent-3)' }}>
                   {t('doctor.all_clear')}
                 </span>
               )}

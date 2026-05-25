@@ -11,8 +11,8 @@ function statusBadge(status: Integration['status']) {
         icon: Check,
         label: t('integrations.status_active'),
         color: 'var(--color-status-success)',
-        border: 'rgba(0, 230, 138, 0.2)',
-        bg: 'rgba(0, 230, 138, 0.06)'
+        border: 'rgba(44, 74, 44, 0.25)',
+        bg: 'var(--accent-3-soft)'
       };
     case 'Available':
       return {
@@ -62,7 +62,7 @@ export default function Integrations() {
   if (error) {
     return (
     <div className="p-6 animate-fade-in">
-      <div className="rounded-2xl border p-4" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+      <div className="rounded-2xl border p-4" style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent-soft-2)', color: 'var(--accent)' }}>
         {t('integrations.load_error')}: {error}
       </div>
     </div>

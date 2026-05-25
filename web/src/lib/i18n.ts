@@ -454,27 +454,37 @@ const translations: Record<Locale, Record<string, string>> = {
     'app.pairing_subtitle_code_ready': 'Your pairing code is ready. Click Pair to connect.',
     'app.pairing_subtitle_enter_code': 'Enter the pairing code from your terminal.',
 
-    // Navigation
-    'nav.dashboard': 'Dashboard',
-    'nav.agent': 'Agent',
-    'nav.tools': 'Tools',
-    'nav.cron': 'Scheduled Jobs',
+    // Navigation - V1.1 §5.1 (9 locked nav items + legacy aliases for
+    // URL-direct surfaces)
+    'nav.home':         'Home',
+    'nav.chat':         'Chat',
+    'nav.timeline':     'Timeline',
+    'nav.people':       'People',
+    'nav.wiki':         'Personal wiki',
+    'nav.memory':       'Memory',
     'nav.integrations': 'Integrations',
-    'nav.memory': 'Memory',
-    'nav.config': 'Configuration',
-    'nav.cost': 'Cost Tracker',
-    'nav.logs': 'Logs',
-    'nav.doctor': 'Doctor',
-    'nav.canvas': 'Canvas',
-    // CX-81 B6 + B7: wiki nav label. B7 introduces the nav item itself; B6
-    // wires the customer-personalised label. Renderers should call
+    'nav.health':       'Health',
+    'nav.settings':     'Settings',
+
+    // CX-81 B6: customer-personalised wiki label fallback. Renderers may call
     // `firstNameToPediaLabel(user_first_name)` to derive the label at
     // render-time and fall back to this key (`Personal wiki`) when the
     // customer's first name is unset.
-    'nav.wiki': 'Wiki',
     'nav.wiki_fallback': 'Personal wiki',
 
-    // Wiki page (embedded wiki webview)
+    // Legacy aliases (kept so older URL-direct surfaces and unmigrated
+    // string callers keep resolving). These map onto V1.1 surfaces 1:1.
+    'nav.dashboard':    'Home',
+    'nav.agent':        'Chat',
+    'nav.config':       'Settings',
+    'nav.doctor':       'Health',
+    'nav.tools':        'Tools',
+    'nav.cron':         'Scheduled tasks',
+    'nav.cost':         'Cost',
+    'nav.logs':         'Logs',
+    'nav.canvas':       'Canvas',
+
+    // Wiki page (embedded wiki webview, CX-81 B7)
     'wiki.loading_title': 'Building your wiki...',
     'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
     'wiki.error_title': 'Wiki not available',

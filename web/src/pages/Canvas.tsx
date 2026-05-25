@@ -103,20 +103,20 @@ export default function Canvas() {
 
     let html = currentFrame.content;
     if (currentFrame.content_type === 'svg') {
-      html = `<!DOCTYPE html><html><head><style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1a1a2e;}</style></head><body>${currentFrame.content}</body></html>`;
+      html = `<!DOCTYPE html><html><head><style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#F8F8F4;}</style></head><body>${currentFrame.content}</body></html>`;
     } else if (currentFrame.content_type === 'markdown') {
       // Simple markdown-to-HTML: render as preformatted text with basic styling
       const escaped = currentFrame.content
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      html = `<!DOCTYPE html><html><head><style>body{margin:1rem;font-family:system-ui,sans-serif;color:#e0e0e0;background:#1a1a2e;line-height:1.6;}pre{white-space:pre-wrap;word-wrap:break-word;}</style></head><body><pre>${escaped}</pre></body></html>`;
+      html = `<!DOCTYPE html><html><head><style>body{margin:1rem;font-family:system-ui,sans-serif;color:#14120E;background:#F8F8F4;line-height:1.6;}pre{white-space:pre-wrap;word-wrap:break-word;}</style></head><body><pre>${escaped}</pre></body></html>`;
     } else if (currentFrame.content_type === 'text') {
       const escaped = currentFrame.content
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      html = `<!DOCTYPE html><html><head><style>body{margin:1rem;font-family:monospace;color:#e0e0e0;background:#1a1a2e;white-space:pre-wrap;}</style></head><body>${escaped}</body></html>`;
+      html = `<!DOCTYPE html><html><head><style>body{margin:1rem;font-family:monospace;color:#14120E;background:#F8F8F4;white-space:pre-wrap;}</style></head><body>${escaped}</body></html>`;
     }
 
     doc.open();
@@ -157,13 +157,7 @@ export default function Canvas() {
           <h1 className="text-xl font-semibold" style={{ color: 'var(--pc-text-primary)' }}>
             Live Canvas
           </h1>
-          <span
-            className="text-xs px-2 py-0.5 rounded-full font-medium"
-            style={{
-              background: connected ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-              color: connected ? '#22c55e' : '#ef4444',
-            }}
-          >
+          <span className={connected ? 'pill pill--active' : 'pill pill--dormant'}>
             {connected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
@@ -248,7 +242,7 @@ export default function Canvas() {
         {/* Canvas viewer */}
         <div
           className="flex-1 rounded-lg border overflow-hidden"
-          style={{ borderColor: 'var(--pc-border)', background: '#1a1a2e' }}
+          style={{ borderColor: 'var(--hairline)', background: 'var(--chassis)' }}
         >
           {currentFrame ? (
             <iframe
@@ -256,7 +250,7 @@ export default function Canvas() {
               sandbox="allow-scripts allow-same-origin"
               className="w-full h-full border-0"
               title={`Canvas: ${canvasId}`}
-              style={{ background: '#1a1a2e' }}
+              style={{ background: 'var(--chassis)' }}
             />
           ) : (
             <div className="flex items-center justify-center h-full">

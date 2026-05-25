@@ -277,7 +277,7 @@ export default function Cron() {
   if (error) {
     return (
       <div className="p-6 animate-fade-in">
-        <div className="rounded-2xl border p-4" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+        <div className="rounded-2xl border p-4" style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent-soft-2)', color: 'var(--accent)' }}>
           {t('cron.load_error')}: {error}
         </div>
       </div>
@@ -326,7 +326,7 @@ export default function Cron() {
             disabled={togglingCatchUp}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-300 focus:outline-none ${
               settings.catch_up_on_startup
-                ? 'bg-[#0080ff]'
+                ? 'bg-[var(--accent)]'
                 : 'bg-[#1a1a3e]'
             }`}
           >
@@ -357,7 +357,7 @@ export default function Cron() {
               </button>
             </div>
             {formError && (
-              <div className="mb-4 rounded-xl border p-3 text-sm animate-fade-in" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+              <div className="mb-4 rounded-xl border p-3 text-sm animate-fade-in" style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent-soft-2)', color: 'var(--accent)' }}>
                 {formError}
               </div>
             )}
@@ -469,7 +469,7 @@ export default function Cron() {
                     </td>
                     <td>
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold border"
-                        style={job.enabled ? { color: 'var(--color-status-success)', borderColor: 'rgba(0, 230, 138, 0.2)', background: 'rgba(0, 230, 138, 0.06)' } : { color: 'var(--pc-text-faint)', borderColor: 'var(--pc-border)', background: 'transparent' }}>
+                        style={job.enabled ? { color: 'var(--color-status-success)', borderColor: 'rgba(44, 74, 44, 0.25)', background: 'var(--accent-3-soft)' } : { color: 'var(--pc-text-faint)', borderColor: 'var(--pc-border)', background: 'transparent' }}>
                         {job.enabled ? t('cron.enabled_status') : t('cron.disabled_status')}
                       </span>
                     </td>

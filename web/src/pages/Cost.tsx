@@ -25,7 +25,7 @@ export default function Cost() {
   if (error) {
     return (
       <div className="p-6 animate-fade-in">
-        <div className="rounded-2xl border p-4" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+        <div className="rounded-2xl border p-4" style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent-soft-2)', color: 'var(--accent)' }}>
           {t('cost.load_error')}: {error}
         </div>
       </div>
@@ -48,9 +48,9 @@ export default function Cost() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
         {[
           { icon: DollarSign, accent: 'var(--pc-accent)', bg: 'rgba(var(--pc-accent-rgb), 0.08)', label: t('cost.session_cost'), value: formatUSD(cost.session_cost_usd) },
-          { icon: TrendingUp, accent: 'var(--color-status-success)', bg: 'rgba(0, 230, 138, 0.08)', label: t('cost.daily_cost'), value: formatUSD(cost.daily_cost_usd) },
-          { icon: Layers, accent: '#a78bfa', bg: 'rgba(167, 139, 250, 0.08)', label: t('cost.monthly_cost'), value: formatUSD(cost.monthly_cost_usd) },
-          { icon: Hash, accent: 'var(--color-status-warning)', bg: 'rgba(255, 170, 0, 0.08)', label: t('cost.total_requests'), value: cost.request_count.toLocaleString() },
+          { icon: TrendingUp, accent: 'var(--color-status-success)', bg: 'var(--accent-3-soft)', label: t('cost.daily_cost'), value: formatUSD(cost.daily_cost_usd) },
+          { icon: Layers, accent: 'var(--accent-2)', bg: 'var(--accent-2-soft)', label: t('cost.monthly_cost'), value: formatUSD(cost.monthly_cost_usd) },
+          { icon: Hash, accent: 'var(--color-status-warning)', bg: 'var(--accent-warm-soft)', label: t('cost.total_requests'), value: cost.request_count.toLocaleString() },
         ].map(({ icon: Icon, accent, bg, label, value }) => (
           <div key={label} className="card p-5 animate-slide-in-up">
             <div className="flex items-center gap-3 mb-3">

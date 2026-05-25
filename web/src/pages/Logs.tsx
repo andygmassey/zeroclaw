@@ -20,25 +20,25 @@ function formatTimestamp(ts?: string): string {
 function eventTypeStyle(type: string): { color: string; bg: string; border: string } {
   switch (type.toLowerCase()) {
     case 'error':
-      return { color: 'var(--color-status-error)', bg: 'rgba(239, 68, 68, 0.06)', border: 'rgba(239, 68, 68, 0.2)' };
+      return { color: 'var(--color-status-error)', bg: 'var(--accent-soft)', border: 'var(--accent-soft-2)' };
     case 'warn':
     case 'warning':
-      return { color: 'var(--color-status-warning)', bg: 'rgba(255, 170, 0, 0.06)', border: 'rgba(255, 170, 0, 0.2)' };
+      return { color: 'var(--color-status-warning)', bg: 'var(--accent-warm-soft)', border: 'rgba(139, 101, 0, 0.25)' };
     case 'tool_call':
     case 'tool_result':
     case 'tool_call_start':
-      return { color: '#a78bfa', bg: 'rgba(167, 139, 250, 0.06)', border: 'rgba(167, 139, 250, 0.2)' };
+      return { color: 'var(--accent-2)', bg: 'var(--accent-2-soft)', border: 'rgba(30, 44, 82, 0.25)' };
     case 'llm_request':
       return { color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.06)', border: 'rgba(56, 189, 248, 0.2)' };
     case 'agent_start':
     case 'agent_end':
-      return { color: '#34d399', bg: 'rgba(52, 211, 153, 0.06)', border: 'rgba(52, 211, 153, 0.2)' };
+      return { color: 'var(--accent-3)', bg: 'var(--accent-3-soft)', border: 'rgba(44, 74, 44, 0.25)' };
     case 'message':
     case 'chat':
       return { color: 'var(--pc-accent)', bg: 'var(--pc-accent-glow)', border: 'var(--pc-accent-dim)' };
     case 'health':
     case 'status':
-      return { color: 'var(--color-status-success)', bg: 'rgba(0, 230, 138, 0.06)', border: 'rgba(0, 230, 138, 0.2)' };
+      return { color: 'var(--color-status-success)', bg: 'var(--accent-3-soft)', border: 'rgba(44, 74, 44, 0.25)' };
     default:
       return { color: 'var(--pc-text-muted)', bg: 'var(--pc-hover)', border: 'var(--pc-border)' };
   }

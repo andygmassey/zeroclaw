@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Bot, User, AlertCircle, Copy, Check } from 'lucide-react';
+import { Send, AlertCircle, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { WsMessage } from '@/types/api';
@@ -10,6 +10,7 @@ import { t } from '@/lib/i18n';
 import { getSessionMessages } from '@/lib/api';
 import ToolCallCard from '@/components/ToolCallCard';
 import type { ToolCallInfo } from '@/components/ToolCallCard';
+import LetterAvatar from '@/components/brand/LetterAvatar';
 import {
   loadChatHistory,
   mapServerMessagesToPersisted,
@@ -17,6 +18,20 @@ import {
   saveChatHistory,
   uiMessagesToPersisted,
 } from '@/lib/chatHistoryStorage';
+
+/**
+ * Assistant identity placeholder. Per BRAND_SPEC_V1.1 §3.8 the chat header
+ * should read `{{user_assistant_name}}` (captured at CM051 setup wizard Q7).
+ * The B6 wire is in flight — until it lands, fall back to "Your assistant"
+ * per V1.1 §8 (non-symmetric fallback rule).
+ */
+const ASSISTANT_NAME_FALLBACK = 'Your assistant';
+const ASSISTANT_SUBTITLE = 'Running locally on Hub';
+function assistantInitial(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'your assistant') return 'O';
+  return trimmed.slice(0, 1).toUpperCase();
+}
 
 interface ChatMessage {
   id: string;
@@ -369,125 +384,333 @@ export default function AgentChat() {
     }
   }
 
+  const assistantName = ASSISTANT_NAME_FALLBACK;
+  const assistantLetter = assistantInitial(assistantName);
+
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem)]">
-      {/* Connection status bar */}
+    <div
+      className="flex flex-col"
+      style={{ height: 'calc(100vh - 56px)', background: 'var(--chassis)' }}
+    >
+      {/* Connection error banner — V1.1 §3.16 default note-box variant. */}
       {error && (
-        <div className="px-4 py-2 border-b flex items-center gap-2 text-sm animate-fade-in" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171', }}>
-          <AlertCircle className="h-4 w-4 shrink-0" />
+        <div
+          className="animate-fade-in"
+          style={{
+            padding: 'var(--space-2) var(--space-4)',
+            background: 'var(--accent-soft)',
+            borderBottom: '1px solid var(--accent-soft-2)',
+            color: 'var(--accent)',
+            fontFamily: 'var(--f-body)',
+            fontSize: '13px',
+            lineHeight: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+          }}
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" strokeWidth={1.5} />
           {error}
         </div>
       )}
 
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center animate-fade-in" style={{ color: 'var(--pc-text-muted)' }}>
-            <div className="h-16 w-16 rounded-3xl flex items-center justify-center mb-4 animate-float" style={{ background: 'var(--pc-accent-glow)' }}>
-              <Bot className="h-8 w-8" style={{ color: 'var(--pc-accent)' }} />
-            </div>
-            <p className="text-lg font-semibold mb-1" style={{ color: 'var(--pc-text-primary)' }}>Ostler Agent</p>
-            <p className="text-sm" style={{ color: 'var(--pc-text-muted)' }}>{t('agent.start_conversation')}</p>
-          </div>
-        )}
-
-        {messages.map((msg, idx) => (
-          <div
-            key={msg.id}
-            className={`group flex items-start gap-3 ${
-              msg.role === 'user' ? 'flex-row-reverse animate-slide-in-right' : 'animate-slide-in-left'
-            }`}
-            style={{ animationDelay: `${Math.min(idx * 30, 200)}ms` }}
-          >
+      {/* Messages area — chassis background, oxblood accents. */}
+      <div
+        className="flex-1 overflow-y-auto"
+        style={{ padding: 'var(--space-4)' }}
+      >
+        <div style={{ maxWidth: '880px', margin: '0 auto' }}>
+          {messages.length === 0 && (
             <div
-              className="flex-shrink-0 w-9 h-9 rounded-2xl flex items-center justify-center border"
+              className="animate-fade-in"
               style={{
-                background: msg.role === 'user' ? 'var(--pc-accent)' : 'var(--pc-bg-elevated)',
-                borderColor: msg.role === 'user' ? 'var(--pc-accent)' : 'var(--pc-border)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                paddingTop: 'var(--space-7)',
+                gap: 'var(--space-3)',
               }}
             >
+              <LetterAvatar instance="assistant" letter={assistantLetter} size={56} ariaLabel={assistantName} />
+              <p
+                style={{
+                  margin: 0,
+                  fontFamily: 'var(--f-display)',
+                  fontWeight: 600,
+                  fontSize: '18px',
+                  lineHeight: '24px',
+                  color: 'var(--ink)',
+                }}
+              >
+                {assistantName}
+              </p>
+              <p
+                style={{
+                  margin: 0,
+                  fontFamily: 'var(--f-body)',
+                  fontSize: '13px',
+                  lineHeight: '20px',
+                  color: 'var(--ink-muted)',
+                  maxWidth: '420px',
+                }}
+              >
+                {t('agent.start_conversation')}
+              </p>
+            </div>
+          )}
+
+          {messages.map((msg, idx) => (
+            <div
+              key={msg.id}
+              className={`group ${msg.role === 'user' ? 'animate-slide-in-right' : 'animate-slide-in-left'}`}
+              style={{
+                display: 'flex',
+                gap: 'var(--space-3)',
+                alignItems: 'flex-start',
+                marginBottom: 'var(--space-4)',
+                animationDelay: `${Math.min(idx * 30, 200)}ms`,
+                flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+              }}
+            >
+              {/* Letter avatar — Instance A (product) for user, Instance B
+                  (assistant) for the agent. Per V1.1 §3.6 the user avatar uses
+                  the product mark and the assistant avatar uses the
+                  assistant mark. */}
               {msg.role === 'user' ? (
-                <User className="h-4 w-4 text-white" />
+                <LetterAvatar instance="product" letter="O" size={32} ariaLabel="You" />
               ) : (
-                <Bot className="h-4 w-4" style={{ color: 'var(--pc-accent)' }} />
+                <LetterAvatar
+                  instance="assistant"
+                  letter={assistantLetter}
+                  size={32}
+                  ariaLabel={assistantName}
+                />
+              )}
+
+              <div style={{ position: 'relative', maxWidth: '80%' }}>
+                {msg.role === 'user' ? (
+                  /* User pill — Variant C (cream + ink) per V1.1 §3.7 default. */
+                  <div className="user-pill user-pill--C">
+                    {msg.markdown ? (
+                      <div className="chat-markdown" style={{ fontSize: '14px', lineHeight: '22px' }}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p
+                        style={{
+                          margin: 0,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {msg.content}
+                      </p>
+                    )}
+                    <p
+                      style={{
+                        margin: '6px 0 0',
+                        fontFamily: 'var(--f-mono)',
+                        fontSize: '10px',
+                        lineHeight: '14px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                        color: 'var(--ink-muted)',
+                      }}
+                    >
+                      {msg.timestamp.toLocaleTimeString()}
+                    </p>
+                  </div>
+                ) : (
+                  /* Assistant card — Plex Sans size+weight step per V1.1 §3.8. */
+                  <div className="assistant-card">
+                    <div className="head">
+                      <span className="label">{assistantName}</span>
+                      <span className="sub">{ASSISTANT_SUBTITLE}</span>
+                    </div>
+                    {msg.thinking && (
+                      <details style={{ marginBottom: 'var(--space-2)' }}>
+                        <summary
+                          style={{
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            fontFamily: 'var(--f-body)',
+                            fontSize: '12px',
+                            color: 'var(--ink-muted)',
+                          }}
+                        >
+                          Thinking
+                        </summary>
+                        <pre
+                          style={{
+                            marginTop: '4px',
+                            padding: 'var(--space-2)',
+                            borderRadius: 'var(--radius-chip)',
+                            background: 'var(--chassis)',
+                            color: 'var(--ink-muted)',
+                            fontFamily: 'var(--f-mono)',
+                            fontSize: '11px',
+                            lineHeight: '16px',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            overflow: 'auto',
+                            maxHeight: '240px',
+                          }}
+                        >
+                          {msg.thinking}
+                        </pre>
+                      </details>
+                    )}
+                    {msg.toolCall ? (
+                      <ToolCallCard toolCall={msg.toolCall} />
+                    ) : msg.markdown ? (
+                      <div className="chat-markdown body-cont">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="body-cont">{msg.content}</p>
+                    )}
+                    <p
+                      style={{
+                        margin: 'var(--space-2) 0 0',
+                        fontFamily: 'var(--f-mono)',
+                        fontSize: '10px',
+                        lineHeight: '14px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                        color: 'var(--ink-subdued)',
+                      }}
+                    >
+                      {msg.timestamp.toLocaleTimeString()}
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => handleCopy(msg.id, msg.content)}
+                  aria-label={t('agent.copy_message')}
+                  className="opacity-0 group-hover:opacity-100"
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    padding: '6px',
+                    borderRadius: 'var(--radius-chip)',
+                    background: 'var(--panel)',
+                    border: '1px solid var(--hairline)',
+                    color: 'var(--ink-muted)',
+                    cursor: 'pointer',
+                    transition: 'opacity 0.15s ease, color 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = 'var(--accent)';
+                    e.currentTarget.style.borderColor = 'var(--accent-soft-2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = 'var(--ink-muted)';
+                    e.currentTarget.style.borderColor = 'var(--hairline)';
+                  }}
+                >
+                  {copiedId === msg.id ? (
+                    <Check className="h-3 w-3" style={{ color: 'var(--status-success)' }} strokeWidth={1.5} />
+                  ) : (
+                    <Copy className="h-3 w-3" strokeWidth={1.5} />
+                  )}
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* Typing indicator — V1.1 §3.10 */}
+          {typing && (
+            <div
+              className="animate-fade-in"
+              style={{
+                display: 'flex',
+                gap: 'var(--space-3)',
+                alignItems: 'flex-start',
+                marginBottom: 'var(--space-4)',
+              }}
+            >
+              <LetterAvatar
+                instance="assistant"
+                letter={assistantLetter}
+                size={32}
+                ariaLabel={assistantName}
+              />
+              {streamingContent || streamingThinking ? (
+                <div className="assistant-card">
+                  <div className="head">
+                    <span className="label">{assistantName}</span>
+                    <span className="sub">{ASSISTANT_SUBTITLE}</span>
+                  </div>
+                  {streamingThinking && (
+                    <details style={{ marginBottom: 'var(--space-2)' }} open={!streamingContent}>
+                      <summary
+                        style={{
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          fontFamily: 'var(--f-body)',
+                          fontSize: '12px',
+                          color: 'var(--ink-muted)',
+                        }}
+                      >
+                        Thinking{!streamingContent && '...'}
+                      </summary>
+                      <pre
+                        style={{
+                          marginTop: '4px',
+                          padding: 'var(--space-2)',
+                          borderRadius: 'var(--radius-chip)',
+                          background: 'var(--chassis)',
+                          color: 'var(--ink-muted)',
+                          fontFamily: 'var(--f-mono)',
+                          fontSize: '11px',
+                          lineHeight: '16px',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          overflow: 'auto',
+                          maxHeight: '240px',
+                        }}
+                      >
+                        {streamingThinking}
+                      </pre>
+                    </details>
+                  )}
+                  {streamingContent && <p className="body-cont">{streamingContent}</p>}
+                </div>
+              ) : (
+                <div className="typing">
+                  <span className="dot" />
+                  <span className="dot" />
+                  <span className="dot" />
+                </div>
               )}
             </div>
-            <div className="relative max-w-[75%]">
-              <div
-                className="rounded-2xl px-4 py-3 border"
-                style={
-                  msg.role === 'user'
-                    ? { background: 'var(--pc-accent-glow)', borderColor: 'var(--pc-accent-dim)', color: 'var(--pc-text-primary)', }
-                    : { background: 'var(--pc-bg-elevated)', borderColor: 'var(--pc-border)', color: 'var(--pc-text-primary)', }
-                }
-              >
-                {msg.thinking && (
-                  <details className="mb-2">
-                    <summary className="text-xs cursor-pointer select-none" style={{ color: 'var(--pc-text-muted)' }}>Thinking</summary>
-                    <pre className="text-xs mt-1 whitespace-pre-wrap break-words leading-relaxed overflow-auto max-h-60 p-2 rounded-lg" style={{ color: 'var(--pc-text-muted)', background: 'var(--pc-bg-surface)' }}>{msg.thinking}</pre>
-                  </details>
-                )}
-                {msg.toolCall ? (
-                  <ToolCallCard toolCall={msg.toolCall} />
-                ) : msg.markdown ? (
-                  <div className="text-sm break-words leading-relaxed chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown></div>
-                ) : (
-                  <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{msg.content}</p>
-                )}
-                <p
-                  className="text-[10px] mt-1.5" style={{ color: msg.role === 'user' ? 'var(--pc-accent-light)' : 'var(--pc-text-faint)' }}>
-                  {msg.timestamp.toLocaleTimeString()}
-                </p>
-              </div>
-              <button
-                onClick={() => handleCopy(msg.id, msg.content)}
-                aria-label={t('agent.copy_message')}
-                className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-all p-1.5 rounded-xl"
-                style={{ background: 'var(--pc-bg-elevated)', border: '1px solid var(--pc-border)', color: 'var(--pc-text-muted)', }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--pc-text-primary)'; e.currentTarget.style.borderColor = 'var(--pc-accent-dim)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--pc-text-muted)'; e.currentTarget.style.borderColor = 'var(--pc-border)'; }}
-              >
-                {copiedId === msg.id ? (
-                  <Check className="h-3 w-3" style={{ color: '#34d399' }} />
-                ) : (
-                  <Copy className="h-3 w-3" />
-                )}
-              </button>
-            </div>
-          </div>
-        ))}
+          )}
 
-        {typing && (
-          <div className="flex items-start gap-3 animate-fade-in">
-            <div className="flex-shrink-0 w-9 h-9 rounded-2xl flex items-center justify-center border" style={{ background: 'var(--pc-bg-elevated)', borderColor: 'var(--pc-border)' }}>
-              <Bot className="h-4 w-4" style={{ color: 'var(--pc-accent)' }} />
-            </div>
-            {streamingContent || streamingThinking ? (
-              <div className="rounded-2xl px-4 py-3 border max-w-[75%]" style={{ background: 'var(--pc-bg-elevated)', borderColor: 'var(--pc-border)', color: 'var(--pc-text-primary)' }}>
-                {streamingThinking && (
-                  <details className="mb-2" open={!streamingContent}>
-                    <summary className="text-xs cursor-pointer select-none" style={{ color: 'var(--pc-text-muted)' }}>Thinking{!streamingContent && '...'}</summary>
-                    <pre className="text-xs mt-1 whitespace-pre-wrap break-words leading-relaxed overflow-auto max-h-60 p-2 rounded-lg" style={{ color: 'var(--pc-text-muted)', background: 'var(--pc-bg-surface)' }}>{streamingThinking}</pre>
-                  </details>
-                )}
-                {streamingContent && <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{streamingContent}</p>}
-              </div>
-            ) : (
-              <div className="rounded-2xl px-4 py-3 border flex items-center gap-1.5" style={{ background: 'var(--pc-bg-elevated)', borderColor: 'var(--pc-border)' }}>
-                <span className="bounce-dot w-1.5 h-1.5 rounded-full" style={{ background: 'var(--pc-accent)' }} />
-                <span className="bounce-dot w-1.5 h-1.5 rounded-full" style={{ background: 'var(--pc-accent)' }} />
-                <span className="bounce-dot w-1.5 h-1.5 rounded-full" style={{ background: 'var(--pc-accent)' }} />
-              </div>
-            )}
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Input area */}
-      <div className="border-t p-4" style={{ borderColor: 'var(--pc-border)', background: 'var(--pc-bg-surface)' }}>
-        <div className="flex items-center gap-3 max-w-4xl mx-auto">
+      {/* Input area — chassis-deep dock at the bottom. */}
+      <div
+        style={{
+          borderTop: '1px solid var(--hairline)',
+          background: 'var(--chassis-deep)',
+          padding: 'var(--space-3) var(--space-4)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-end',
+            gap: 'var(--space-2)',
+            maxWidth: '880px',
+            margin: '0 auto',
+          }}
+        >
           <textarea
             ref={inputRef}
             rows={1}
@@ -496,28 +719,79 @@ export default function AgentChat() {
             onKeyDown={handleKeyDown}
             placeholder={connected ? t('agent.type_message') : t('agent.connecting')}
             disabled={!connected}
-            className="input-electric flex-1 px-4 text-sm resize-none disabled:opacity-40"
-            style={{ minHeight: '44px', maxHeight: '200px', paddingTop: '10px', paddingBottom: '10px' }}
+            style={{
+              flex: 1,
+              minHeight: '44px',
+              maxHeight: '200px',
+              padding: '10px 14px',
+              background: 'var(--panel)',
+              border: '1px solid var(--hairline-soft)',
+              borderRadius: 'var(--radius-control)',
+              color: 'var(--ink)',
+              fontFamily: 'var(--f-body)',
+              fontSize: '14px',
+              lineHeight: '22px',
+              resize: 'none',
+              opacity: connected ? 1 : 0.5,
+            }}
           />
           <button
-            type='button'
+            type="button"
             onClick={handleSend}
             disabled={!connected || !input.trim()}
-            className="btn-electric flex-shrink-0 rounded-2xl flex items-center justify-center"
-            style={{ color: 'white', width: '40px', height: '40px' }}
+            aria-label="Send"
+            style={{
+              flexShrink: 0,
+              width: '44px',
+              height: '44px',
+              borderRadius: '9999px',
+              background: 'var(--accent)',
+              color: '#fff',
+              border: 'none',
+              cursor: connected && input.trim() ? 'pointer' : 'not-allowed',
+              opacity: connected && input.trim() ? 1 : 0.4,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'background-color 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              if (connected && input.trim()) e.currentTarget.style.background = 'var(--accent-hover)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--accent)';
+            }}
           >
-            <Send className="h-5 w-5" />
+            <Send className="h-5 w-5" strokeWidth={1.5} />
           </button>
         </div>
-        <div className="flex items-center justify-center mt-2 gap-2">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginTop: 'var(--space-2)',
+            gap: '6px',
+          }}
+        >
+          {/* Status dot — no glow per V1.1 Don'ts #6. */}
           <span
             className="status-dot"
-            style={connected
-              ? { background: 'var(--color-status-success)', boxShadow: '0 0 6px var(--color-status-success)' }
-              : { background: 'var(--color-status-error)', boxShadow: '0 0 6px var(--color-status-error)' }
-            }
+            style={{
+              background: connected ? 'var(--status-success)' : 'var(--ink-faint)',
+            }}
+            aria-hidden
           />
-          <span className="text-[10px]" style={{ color: 'var(--pc-text-faint)' }}>
+          <span
+            style={{
+              fontFamily: 'var(--f-mono)',
+              fontSize: '10px',
+              lineHeight: '14px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: 'var(--ink-muted)',
+            }}
+          >
             {connected ? t('agent.connected_status') : t('agent.disconnected_status')}
           </span>
         </div>

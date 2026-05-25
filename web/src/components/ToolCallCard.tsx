@@ -65,7 +65,7 @@ export default function ToolCallCard({ toolCall }: ToolCallCardProps) {
         <Icon className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--pc-accent)' }} />
         <span>{toolCall.name}</span>
         {resolved ? (
-          <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" style={{ color: '#34d399' }} />
+          <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" style={{ color: 'var(--accent-3)' }} />
         ) : (
           <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin" style={{ color: 'var(--pc-accent)' }} />
         )}

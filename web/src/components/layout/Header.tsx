@@ -6,17 +6,28 @@ import { useLocaleContext } from '@/App';
 import { useAuth } from '@/hooks/useAuth';
 import { SettingsModal } from '@/components/SettingsModal';
 
-const routeTitles: Record<string, string> = {
-  '/': 'nav.dashboard',
-  '/agent': 'nav.agent',
-  '/tools': 'nav.tools',
-  '/cron': 'nav.cron',
-  '/integrations': 'nav.integrations',
-  '/memory': 'nav.memory',
-  '/config': 'nav.config',
-  '/cost': 'nav.cost',
-  '/logs': 'nav.logs',
-  '/doctor': 'nav.doctor',
+// V1.1 §5.1 routes. Translations fall back to display labels when the i18n
+// catalogue doesn't yet have the V1.1 keys. Old aliases (/agent, /config,
+// /doctor) kept here so URL-direct visits still render a sensible title.
+const routeTitles: Record<string, { key: string; fallback: string }> = {
+  '/':             { key: 'nav.home',         fallback: 'Home' },
+  '/chat':         { key: 'nav.chat',         fallback: 'Chat' },
+  '/agent':        { key: 'nav.chat',         fallback: 'Chat' },
+  '/timeline':     { key: 'nav.timeline',     fallback: 'Timeline' },
+  '/people':       { key: 'nav.people',       fallback: 'People' },
+  '/wiki':         { key: 'nav.wiki',         fallback: 'Personal wiki' },
+  '/memory':       { key: 'nav.memory',       fallback: 'Memory' },
+  '/integrations': { key: 'nav.integrations', fallback: 'Integrations' },
+  '/health':       { key: 'nav.health',       fallback: 'Health' },
+  '/doctor':       { key: 'nav.health',       fallback: 'Health' },
+  '/settings':     { key: 'nav.settings',     fallback: 'Settings' },
+  '/config':       { key: 'nav.settings',     fallback: 'Settings' },
+  '/tools':        { key: 'nav.tools',        fallback: 'Tools' },
+  '/cron':         { key: 'nav.cron',         fallback: 'Scheduled tasks' },
+  '/cost':         { key: 'nav.cost',         fallback: 'Cost' },
+  '/logs':         { key: 'nav.logs',         fallback: 'Logs' },
+  '/canvas':       { key: 'nav.canvas',       fallback: 'Canvas' },
+  '/pairing':      { key: 'app.pairing_title', fallback: 'Pair this device' },
 };
 
 interface HeaderProps {
@@ -33,8 +44,11 @@ export default function Header({ onMenuToggle, onCollapseToggle, collapsed }: He
   const [langOpen, setLangOpen] = useState(false);
   const langRef = useRef<HTMLDivElement>(null);
 
-  const titleKey = routeTitles[location.pathname] ?? 'nav.dashboard';
-  const pageTitle = t(titleKey);
+  const titleEntry = routeTitles[location.pathname] ?? { key: 'nav.home', fallback: 'Home' };
+  const translated = t(titleEntry.key);
+  // `t` returns the key itself when no translation exists — fall back to the
+  // V1.1 display label so a missing string never reads as "nav.timeline".
+  const pageTitle = translated === titleEntry.key ? titleEntry.fallback : translated;
   const currentFlag = SUPPORTED_LOCALES.find((l) => l.code === locale)?.flag ?? '🌐';
 
   // Close dropdown when clicking outside
@@ -50,7 +64,16 @@ export default function Header({ onMenuToggle, onCollapseToggle, collapsed }: He
 
   return (
     <>
-      <header className="h-14 flex items-center justify-between px-6 border-b animate-fade-in relative" style={{ background: 'var(--pc-bg-surface)', borderColor: 'var(--pc-border)', backdropFilter: 'blur(12px)', zIndex: 100 }}>
+      <header
+        className="flex items-center justify-between animate-fade-in relative"
+        style={{
+          height: '56px',
+          padding: '0 var(--space-4)',
+          background: 'var(--chassis)',
+          borderBottom: '1px solid var(--hairline)',
+          zIndex: 100,
+        }}
+      >
         <div className="flex items-center gap-3">
           {/* Hamburger — visible only on mobile */}
           <button
@@ -78,8 +101,20 @@ export default function Header({ onMenuToggle, onCollapseToggle, collapsed }: He
             {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
           </button>
 
-          {/* Page title */}
-          <h1 className="h-9 leading-9 text-lg font-semibold tracking-tight" style={{ color: 'var(--pc-text-primary)' }}>{pageTitle}</h1>
+          {/* Page title — Outfit SemiBold 18/24 per V1.1 §1.3 type scale */}
+          <h1
+            style={{
+              margin: 0,
+              fontFamily: 'var(--f-display)',
+              fontWeight: 600,
+              fontSize: '18px',
+              lineHeight: '24px',
+              letterSpacing: '-0.2px',
+              color: 'var(--ink)',
+            }}
+          >
+            {pageTitle}
+          </h1>
         </div>
 
         {/* Right-side controls */}
@@ -179,11 +214,11 @@ export default function Header({ onMenuToggle, onCollapseToggle, collapsed }: He
             className="h-9 px-3 rounded-xl text-xs transition-all flex items-center gap-1.5"
             style={{ color: 'var(--pc-text-muted)', background: 'transparent', border: 'none', cursor: 'pointer' }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = '#f87171';
-              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
+              e.currentTarget.style.color = 'var(--accent)';
+              e.currentTarget.style.background = 'var(--accent-soft)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--pc-text-muted)';
+              e.currentTarget.style.color = 'var(--ink-muted)';
               e.currentTarget.style.background = 'transparent';
             }}
           >

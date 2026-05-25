@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Ostler product marque - circular O variant.
+
+  Specification: BRAND_SPEC_V1.1 §3.6 (letter-avatar Instance A "product mark")
+    - 64x64 viewBox, filled circle, oxblood #7A1F1F
+    - Centred "O" in Outfit SemiBold, white #FFFFFF
+    - Used at 28x28 in Hub sidebar header (V1.1 §5.1) and at 32x32 / 64x64
+      elsewhere; SVG scales cleanly. NEVER use a radius-square - V1.1
+      explicitly removed that variant per R4 §8.
+
+  Notes on letter rendering:
+    - Outfit may not be available offline at SVG-render time on every
+      browser. We use a system-stack fallback so the marque always paints
+      a recognisable "O" even if the brand font hasn't loaded yet. Outfit
+      SemiBold loads via index.css `@font-face` on the same origin so the
+      first paint in the Hub picks up the correct face within ~50ms.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Ostler">
+  <circle cx="32" cy="32" r="30" fill="#7A1F1F"/>
+  <text
+    x="32" y="42"
+    text-anchor="middle"
+    font-family="Outfit, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-weight="600"
+    font-size="32"
+    fill="#FFFFFF"
+  >O</text>
+</svg>

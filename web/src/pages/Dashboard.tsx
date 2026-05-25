@@ -58,17 +58,21 @@ function formatRelative(iso: string): string {
   }
 }
 
+// Health status colour helpers — V1.1 §1.1 status palette
+//   success → forest (--accent-3)
+//   warning → warm amber (--accent-warm-amber)
+//   error   → oxblood (--accent)
 function healthColor(status: string): string {
   switch (status.toLowerCase()) {
     case 'ok':
     case 'healthy':
-      return 'var(--color-status-success)';
+      return 'var(--status-success)';
     case 'warn':
     case 'warning':
     case 'degraded':
-      return 'var(--color-status-warning)';
+      return 'var(--status-warning)';
     default:
-      return 'var(--color-status-error)';
+      return 'var(--status-error)';
   }
 }
 
@@ -76,13 +80,13 @@ function healthBorder(status: string): string {
   switch (status.toLowerCase()) {
     case 'ok':
     case 'healthy':
-      return 'rgba(0, 230, 138, 0.2)';
+      return 'rgba(44, 74, 44, 0.25)';
     case 'warn':
     case 'warning':
     case 'degraded':
-      return 'rgba(255, 170, 0, 0.2)';
+      return 'rgba(139, 101, 0, 0.25)';
     default:
-      return 'rgba(255, 68, 102, 0.2)';
+      return 'var(--accent-soft-2)';
   }
 }
 
@@ -90,13 +94,13 @@ function healthBg(status: string): string {
   switch (status.toLowerCase()) {
     case 'ok':
     case 'healthy':
-      return 'rgba(0, 230, 138, 0.05)';
+      return 'var(--accent-3-soft)';
     case 'warn':
     case 'warning':
     case 'degraded':
-      return 'rgba(255, 170, 0, 0.05)';
+      return 'var(--accent-warm-soft)';
     default:
-      return 'rgba(255, 68, 102, 0.05)';
+      return 'var(--accent-soft)';
   }
 }
 
@@ -110,21 +114,21 @@ const STATUS_CARDS = [
   },
   {
     icon: Clock,
-    accent: "#34d399",
+    accent: "var(--accent-3)",
     labelKey: "dashboard.uptime",
     getValue: (s: StatusResponse) => formatUptime(s.uptime_seconds),
     getSub: () => t("dashboard.since_last_restart"),
   },
   {
     icon: Globe,
-    accent: "#a78bfa",
+    accent: "var(--accent-2)",
     labelKey: "dashboard.gateway_port",
     getValue: (s: StatusResponse) => `:${s.gateway_port}`,
     getSub: () => "",
   },
   {
     icon: Database,
-    accent: "#fbbf24",
+    accent: "var(--accent-warm-amber)",
     labelKey: "dashboard.memory_backend",
     getValue: (s: StatusResponse) => s.memory_backend,
     getSub: (s: StatusResponse) =>
@@ -197,12 +201,12 @@ function OverviewTab({
               {
                 label: t("dashboard.daily_label"),
                 value: cost.daily_cost_usd,
-                color: "#34d399",
+                color: "var(--accent-3)",
               },
               {
                 label: t("dashboard.monthly_label"),
                 value: cost.monthly_cost_usd,
-                color: "#a78bfa",
+                color: "var(--accent-2)",
               },
             ].map(({ label, value, color }) => (
               <div key={label}>
@@ -273,9 +277,9 @@ function OverviewTab({
                       color: "var(--pc-accent-light)",
                     }
                   : {
-                      background: "rgba(0, 230, 138, 0.08)",
-                      borderColor: "rgba(0, 230, 138, 0.25)",
-                      color: "#34d399",
+                      background: "var(--accent-3-soft)",
+                      borderColor: "rgba(44, 74, 44, 0.25)",
+                      color: "var(--accent-3)",
                     }
               }
               aria-label={
@@ -328,11 +332,8 @@ function OverviewTab({
                       className="status-dot"
                       style={
                         active
-                          ? {
-                              background: "var(--color-status-success)",
-                              boxShadow: "0 0 6px var(--color-status-success)",
-                            }
-                          : { background: "var(--pc-text-faint)" }
+                          ? { background: "var(--status-success)" }
+                          : { background: "var(--ink-faint)" }
                       }
                     />
                     <span className="text-xs" style={{ color: "var(--pc-text-muted)" }}>
@@ -382,10 +383,7 @@ function OverviewTab({
                   <div className="flex items-center gap-2 mb-1">
                     <span
                       className="status-dot"
-                      style={{
-                        background: healthColor(comp.status),
-                        boxShadow: `0 0 6px ${healthColor(comp.status)}`,
-                      }}
+                      style={{ background: healthColor(comp.status) }}
                     />
                     <span
                       className="text-sm font-medium truncate capitalize"
@@ -472,7 +470,7 @@ function SessionsTab() {
     return (
       <div
         className="rounded-2xl border p-4"
-        style={{ background: "rgba(239, 68, 68, 0.08)", borderColor: "rgba(239, 68, 68, 0.2)", color: "#f87171" }}
+        style={{ background: "var(--accent-soft)", borderColor: "var(--accent-soft-2)", color: "var(--accent)" }}
       >
         {t("dashboard.load_sessions_error")}: {error}
       </div>
@@ -655,7 +653,7 @@ function ChannelsTab() {
     return (
       <div
         className="rounded-2xl border p-4"
-        style={{ background: "rgba(239, 68, 68, 0.08)", borderColor: "rgba(239, 68, 68, 0.2)", color: "#f87171" }}
+        style={{ background: "var(--accent-soft)", borderColor: "var(--accent-soft-2)", color: "var(--accent)" }}
       >
         {t("dashboard.load_channels_error")}: {error}
       </div>
@@ -683,12 +681,12 @@ function ChannelsTab() {
             background: healthBg(channel.health),
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.transform = "translateY(-2px)";
-            e.currentTarget.style.boxShadow = `0 4px 12px ${healthBorder(channel.health)}`;
+            // V1.1 Don'ts #3: no drop shadows on flat cards. Subtle hover
+            // border via boxShadow stays — 1px inset border, not a glow.
+            e.currentTarget.style.borderColor = "var(--hairline-soft)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.boxShadow = "none";
+            e.currentTarget.style.borderColor = "var(--hairline)";
           }}
         >
           {/* Header */}
@@ -714,41 +712,24 @@ function ChannelsTab() {
             </div>
             <span
               className="status-dot"
-              style={{
-                background: healthColor(channel.health),
-                boxShadow: `0 0 6px ${healthColor(channel.health)}`,
-              }}
+              style={{ background: healthColor(channel.health) }}
             />
           </div>
 
-          {/* Status Badge */}
-          <div className="flex items-center gap-2 mb-3">
+          {/* Status pills — V1.1 §3.4 status-pill palette */}
+          <div className="flex items-center gap-2 mb-3 pill-row">
             <span
-              className="text-[10px] uppercase font-medium px-2 py-0.5 rounded-full"
-              style={{
-                background: channel.status === 'active'
-                  ? 'rgba(0, 230, 138, 0.1)'
+              className={
+                channel.status === 'active'
+                  ? 'pill pill--active'
                   : channel.status === 'error'
-                    ? 'rgba(255, 68, 102, 0.1)'
-                    : 'rgba(var(--pc-accent-rgb), 0.08)',
-                color: channel.status === 'active'
-                  ? '#34d399'
-                  : channel.status === 'error'
-                    ? '#f87171'
-                    : 'var(--pc-text-muted)',
-              }}
+                    ? 'pill pill--strong'
+                    : 'pill pill--dormant'
+              }
             >
               {channel.status}
             </span>
-            <span
-              className="text-[10px] uppercase font-medium px-2 py-0.5 rounded-full"
-              style={{
-                background: channel.enabled
-                  ? 'rgba(0, 230, 138, 0.1)'
-                  : 'rgba(255, 68, 102, 0.1)',
-                color: channel.enabled ? '#34d399' : '#f87171',
-              }}
-            >
+            <span className={channel.enabled ? 'pill pill--active' : 'pill pill--dormant'}>
               {channel.enabled ? t("dashboard.channel_enabled") : t("dashboard.channel_disabled")}
             </span>
           </div>
@@ -806,7 +787,7 @@ export default function Dashboard() {
   if (error) {
     return (
       <div className="p-6 animate-fade-in">
-        <div className="rounded-2xl border p-4" style={{ background: "rgba(239, 68, 68, 0.08)", borderColor: "rgba(239, 68, 68, 0.2)", color: "#f87171", }}>
+        <div className="rounded-2xl border p-4" style={{ background: "var(--accent-soft)", borderColor: "var(--accent-soft-2)", color: "var(--accent)", }}>
           {t("dashboard.load_error")}: {error}
         </div>
       </div>
@@ -836,13 +817,13 @@ export default function Dashboard() {
             style={
               activeTab === id
                 ? {
-                    background: "var(--pc-bg-primary)",
-                    color: "var(--pc-accent)",
-                    boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
+                    background: "var(--panel)",
+                    color: "var(--accent)",
+                    border: "1px solid var(--hairline)",
                   }
                 : {
                     background: "transparent",
-                    color: "var(--pc-text-muted)",
+                    color: "var(--ink-muted)",
                   }
             }
             onMouseEnter={(e) => {

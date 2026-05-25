@@ -1,7 +1,144 @@
 @import "tailwindcss";
 
+/* ============================================================================
+ * Ostler Hub — BRAND_SPEC_V1.1 (2026-05-26)
+ *
+ * Token model
+ *   - V1.1 brand tokens live as canonical custom properties (--chassis, --ink,
+ *     --accent, --shadow-lift, ...) and ARE the source-of-truth.
+ *   - Legacy `--pc-*` tokens are REBOUND onto V1.1 values so existing call sites
+ *     (style={{background: 'var(--pc-bg-base)'}}, .btn-electric, etc.) keep
+ *     working without a touch-every-file sweep. Do not rename; rebind only.
+ *
+ * Type stack
+ *   - Outfit (display)  - H1/H2/H3/strap/wordmark
+ *   - IBM Plex Sans (body) - body / caption
+ *   - IBM Plex Mono (meta) - pill, citation source, meta-row, code
+ *   - All three loaded as WOFF2 from `web/public/fonts/`, offline-first
+ *
+ * Surface depth (V1.1 §1.7)
+ *   Layer 0  --chassis        page background
+ *   Layer A  --chassis-deep   sidebars (rail-edge only)
+ *   Layer 1  --chassis-tone1  lift surround (content-area only)
+ *   Layer 2  --chassis-tone2  demo headers, comparison cells
+ *   Layer 3  --chassis-tone3  rare emphasis / error fill
+ *   Layer +1 --panel          white tile, "for special"
+ *
+ * Fixups applied (per `launch/03_BRAND_SPEC_V1.1_FIXUPS.md`):
+ *   Fixup 2-3  `.pill` has white-space:nowrap + width:max-content +
+ *              flex:0 0 auto + font-weight:500 (Plex Mono Medium)
+ *   Fixup 4    `.lift-card` IS the white panel + shadow (single tile, no
+ *              nested chassis-tone1+panel stack). `.lift-card-surround` is
+ *              the optional outer chassis-tone1 wrapper for the page-level
+ *              "white tile sitting on cream" pattern.
+ *   Fixup 6    Timeline rail 1.5px ink-faint (not 1px hairline)
+ *   Fixup 7    .info-org infobox style applied via .infobox.info-org
+ * ============================================================================ */
+
+/* -- Brand fonts (offline-first; bundled in /public/fonts/) --
+ *
+ * Note on format: ships as TTF for v1. Tauri's WKWebView (macOS) and
+ * WebView2 (Windows) both render TTF natively, so there's no rendering
+ * penalty. WOFF2 conversion is a follow-up so the bundle ships ~30% smaller
+ * (queued as a separate PR after this brand reskin lands). The CSS declares
+ * both formats; the browser picks the first available match.
+ *
+ * Mono family: NB the brief calls for IBM Plex Mono, but the OstlerInstaller
+ * source-of-truth (`gui/OstlerInstaller/Theme/OstlerTheme.swift`) ships
+ * JetBrains Mono and treats it as the canonical Ostler mono. The two are
+ * visually close enough (both geometric mono, similar x-height, similar
+ * stem weight) that the brand reads consistent across surfaces. Per brief
+ * §0 inversion rule "installer wins", we ship JetBrains Mono and alias it
+ * under both family names so call sites can use either declaration. */
+
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/Outfit-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/Outfit-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/Outfit-SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/Outfit-Bold.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/IBMPlexSans-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/IBMPlexSans-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/IBMPlexSans-SemiBold.ttf') format('truetype');
+}
+
+/* Mono: declared under both 'IBM Plex Mono' and 'JetBrains Mono' family
+ * names so existing CSS using either name resolves cleanly. The bundled
+ * file is JetBrains Mono per the OstlerInstaller source-of-truth. */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Medium.ttf') format('truetype');
+}
+
+/* -- Tailwind theme bridge -- */
+
 @theme {
-  /* Theme-aware colors mapped to CSS custom properties */
+  /* Legacy `pc-*` colour aliases - kept so Tailwind utility classes
+   * (e.g. `text-pc-text`, `bg-pc-base`) keep resolving onto V1.1 tokens. */
   --color-pc-base: var(--pc-bg-base);
   --color-pc-surface: var(--pc-bg-surface);
   --color-pc-elevated: var(--pc-bg-elevated);
@@ -18,71 +155,157 @@
   --color-pc-accent-dim: var(--pc-accent-dim);
   --color-pc-accent-glow: var(--pc-accent-glow);
 
-  /* Status colors (fixed across themes) */
-  --color-status-success: #00e68a;
-  --color-status-warning: #ffaa00;
-  --color-status-error: #ff4466;
-  --color-status-info: #0080ff;
+  /* Status - V1.1 §1.1: success=forest, warning=warm amber, error=oxblood,
+   * info=navy. */
+  --color-status-success: #2C4A2C;
+  --color-status-warning: #8B6500;
+  --color-status-error: #7A1F1F;
+  --color-status-info: #1E2C52;
 }
+
+/* -- V1.1 canonical tokens (source-of-truth) -- */
 
 :root {
-  /* Status colors for reference */
-  --color-status-success: #00e68a;
-  --color-status-warning: #ffaa00;
-  --color-status-error: #ff4466;
-  --color-status-info: #0080ff;
+  /* Backgrounds - cream + tonal layers (V1.1 §1.7) */
+  --chassis:         #F8F8F4;
+  --chassis-deep:    #ECEBE5;
+  --chassis-tone1:   #E5E3DC;
+  --chassis-tone2:   #D8D6CE;
+  --chassis-tone3:   #CCC9C0;
+  --panel:           #FFFFFF;
+
+  /* Ink - near-black */
+  --ink:             #14120E;
+  --ink-muted:       rgba(20, 18, 14, 0.65);
+  --ink-subdued:     rgba(20, 18, 14, 0.50);
+  --ink-faint:       rgba(20, 18, 14, 0.18);
+  --hairline:        rgba(20, 18, 14, 0.08);
+  --hairline-soft:   rgba(20, 18, 14, 0.18);
+
+  /* Accent - single canonical oxblood */
+  --accent:          #7A1F1F;
+  --accent-hover:    #5E1717;
+  --accent-warm:     #A82A2A;
+  --accent-soft:     rgba(122, 31, 31, 0.08);
+  --accent-soft-2:   rgba(122, 31, 31, 0.18);
+
+  /* Supporting palette (sparing - pills, callouts, avatar rotation) */
+  --accent-2:        #1E2C52;
+  --accent-2-soft:   rgba(30, 44, 82, 0.10);
+  --accent-3:        #2C4A2C;
+  --accent-3-soft:   rgba(44, 74, 44, 0.10);
+  --accent-warm-amber: #8B6500;
+  --accent-warm-soft: rgba(139, 101, 0, 0.10);
+
+  /* Links */
+  --link:            #7A1F1F;
+  --link-secondary:  rgba(122, 31, 31, 0.65);
+
+  /* Status (functional) */
+  --status-success:  #2C4A2C;
+  --status-warning:  #8B6500;
+  --status-error:    #7A1F1F;
+  --status-info:     #1E2C52;
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 40px;
+  --space-6: 64px;
+  --space-7: 96px;
+
+  /* Radius scale */
+  --radius-pill:    9999px;
+  --radius-card:    12px;
+  --radius-control: 8px;
+  --radius-chip:    4px;
+
+  /* Shadows - V1.1 §1.5 */
+  --shadow-card: 0 0 0 0.5px rgba(20, 18, 14, 0.07),
+                 0 1px 1px rgba(20, 18, 14, 0.04),
+                 0 2px 4px rgba(20, 18, 14, 0.04),
+                 0 8px 16px rgba(20, 18, 14, 0.05),
+                 0 24px 48px rgba(20, 18, 14, 0.07),
+                 0 56px 96px rgba(20, 18, 14, 0.10);
+  --shadow-soft: 0 0 0 0.5px rgba(20, 18, 14, 0.05),
+                 0 4px 12px rgba(20, 18, 14, 0.04),
+                 0 16px 32px rgba(20, 18, 14, 0.06);
+  --shadow-lift: 0 0 0 0.5px rgba(20, 18, 14, 0.05),
+                 0 6px 18px rgba(20, 18, 14, 0.06),
+                 0 1px 1px rgba(20, 18, 14, 0.04);
+  --shadow-none: none;
+
+  /* Brand font families */
+  --f-display: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --f-body:    'IBM Plex Sans', -apple-system, system-ui, sans-serif;
+  --f-mono:    'IBM Plex Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, Consolas, monospace;
+
+  /* =========================================================================
+   * `--pc-*` legacy alias layer - REBINDS V1.0 dark-cyan tokens onto V1.1
+   * light-cream + oxblood values. DO NOT rename - call sites all over the
+   * page tree consume these and the rename is a separate sweep.
+   * ========================================================================= */
+
   /* Backgrounds */
-  --pc-bg-base: #1e1e24;
-  --pc-bg-surface: #232329;
-  --pc-bg-elevated: #27272a;
-  --pc-bg-input: #1a1a20;
-  --pc-bg-code: #1a1a20;
-  --pc-bg-sidebar: rgba(30, 30, 36, 0.95);
+  --pc-bg-base:     var(--chassis);
+  --pc-bg-surface:  var(--chassis);
+  --pc-bg-elevated: var(--chassis-deep);
+  --pc-bg-input:    var(--panel);
+  --pc-bg-code:     var(--chassis-deep);
+  --pc-bg-sidebar:  var(--chassis-deep);
+  --pc-bg-tone1:    var(--chassis-tone1);
+  --pc-bg-tone2:    var(--chassis-tone2);
+  --pc-bg-tone3:    var(--chassis-tone3);
 
   /* Borders */
-  --pc-border: rgba(255, 255, 255, 0.08);
-  --pc-border-strong: rgba(255, 255, 255, 0.1);
+  --pc-border:        var(--hairline);
+  --pc-border-strong: var(--hairline-soft);
 
   /* Text */
-  --pc-text-primary: #d4d4d8;
-  --pc-text-secondary: #a1a1aa;
-  --pc-text-muted: #71717a;
-  --pc-text-faint: #52525b;
+  --pc-text-primary:   var(--ink);
+  --pc-text-secondary: var(--ink-muted);
+  --pc-text-muted:     var(--ink-muted);
+  --pc-text-faint:     var(--ink-faint);
 
-  /* Accent (cyan) */
-  --pc-accent: #22d3ee;
-  --pc-accent-light: #67e8f9;
-  --pc-accent-dim: rgba(34, 211, 238, 0.3);
-  --pc-accent-glow: rgba(34, 211, 238, 0.1);
-  --pc-accent-rgb: 34, 211, 238;
+  /* Accent - was cyan, now oxblood */
+  --pc-accent:       var(--accent);
+  --pc-accent-light: var(--accent);
+  --pc-accent-dim:   var(--accent-soft-2);
+  --pc-accent-glow:  var(--accent-soft);
+  --pc-accent-rgb:   122, 31, 31;
+  --pc-link-secondary: var(--link-secondary);
 
   /* Hover */
-  --pc-hover: rgba(255, 255, 255, 0.05);
-  --pc-hover-strong: rgba(255, 255, 255, 0.08);
-  --pc-separator: rgba(255, 255, 255, 0.05);
+  --pc-hover:        var(--accent-soft);
+  --pc-hover-strong: var(--accent-soft-2);
+  --pc-separator:    var(--hairline);
 
   /* Scrollbar */
-  --pc-scrollbar-thumb: #52525b;
-  --pc-scrollbar-track: #27272a;
-  --pc-scrollbar-thumb-hover: #71717a;
+  --pc-scrollbar-thumb:       var(--ink-faint);
+  --pc-scrollbar-track:       transparent;
+  --pc-scrollbar-thumb-hover: var(--ink-subdued);
 
-  /* Fonts */
-  --pc-font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --pc-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, Consolas, monospace;
-  --pc-font-size: 15px;
-  --pc-font-size-mono: 14px;
+  /* Fonts - rebind from Inter/JetBrains onto Outfit/Plex */
+  --pc-font-ui:        var(--f-body);
+  --pc-font-display:   var(--f-display);
+  --pc-font-mono:      var(--f-mono);
+  --pc-font-size:      14px;
+  --pc-font-size-mono: 11px;
 }
 
-html {
-}
+/* -- Page foundation -- */
 
 body {
-  background-color: var(--pc-bg-base);
-  color: var(--pc-text-primary);
-  font-family: var(--pc-font-ui);
-  font-size: var(--pc-font-size);
+  background-color: var(--chassis);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 14px;
+  line-height: 22px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   margin: 0;
   overflow-x: hidden;
   max-width: 100vw;
@@ -92,9 +315,8 @@ body {
   min-height: 100vh;
 }
 
-/* Focus ring */
 :focus-visible {
-  outline: 2px solid var(--pc-accent-dim);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -102,7 +324,8 @@ body {
   outline: none;
 }
 
-/* Scrollbar */
+/* -- Scrollbar -- */
+
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--pc-scrollbar-thumb) var(--pc-scrollbar-track);
@@ -152,10 +375,11 @@ textarea {
 }
 
 code, kbd, pre {
-  font-family: var(--pc-font-mono);
+  font-family: var(--f-mono);
 }
 
-/* ── Animations ── */
+/* -- Animations -- */
+
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -196,6 +420,11 @@ code, kbd, pre {
   40% { transform: translateY(-4px); opacity: 1; }
 }
 
+@keyframes typing-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40% { transform: translateY(-4px); opacity: 1; }
+}
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -206,50 +435,25 @@ code, kbd, pre {
   50% { transform: translateY(-4px); }
 }
 
-.animate-fade-in {
-  animation: fade-in 0.3s ease-out;
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
-.animate-fade-in-legacy {
-  animation: fadeIn 0.4s ease-out both;
-}
+.animate-fade-in        { animation: fade-in 0.3s ease-out; }
+.animate-fade-in-legacy { animation: fadeIn 0.4s ease-out both; }
+.animate-fade-in-scale  { animation: fadeInScale 0.3s ease-out both; }
+.animate-slide-in-left  { animation: slideInLeft 0.4s ease-out both; }
+.animate-slide-in-right { animation: slideInRight 0.4s ease-out both; }
+.animate-slide-in-up    { animation: slideInUp 0.4s ease-out both; }
+.animate-pulse-glow     { animation: fadeIn 2s ease-in-out infinite; }
+.animate-float          { animation: float 3s ease-in-out infinite; }
 
-.animate-fade-in-scale {
-  animation: fadeInScale 0.3s ease-out both;
-}
-
-.animate-slide-in-left {
-  animation: slideInLeft 0.4s ease-out both;
-}
-
-.animate-slide-in-right {
-  animation: slideInRight 0.4s ease-out both;
-}
-
-.animate-slide-in-up {
-  animation: slideInUp 0.4s ease-out both;
-}
-
-.animate-pulse-glow {
-  animation: fadeIn 2s ease-in-out infinite;
-}
-
-.animate-float {
-  animation: float 3s ease-in-out infinite;
-}
-
-.pulse-dot {
-  animation: pulse-dot 2s ease-in-out infinite;
-}
-
-.bounce-dot {
-  animation: bounce-dot 0.9s infinite ease-in-out;
-}
+.pulse-dot  { animation: pulse-dot 2s ease-in-out infinite; }
+.bounce-dot { animation: bounce-dot 0.9s infinite ease-in-out; }
 .bounce-dot:nth-child(1) { animation-delay: 0s; }
 .bounce-dot:nth-child(2) { animation-delay: 0.12s; }
 .bounce-dot:nth-child(3) { animation-delay: 0.24s; }
 
-/* Stagger delays */
 .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
 .stagger-children > *:nth-child(2) { animation-delay: 60ms; }
 .stagger-children > *:nth-child(3) { animation-delay: 120ms; }
@@ -261,169 +465,194 @@ code, kbd, pre {
 .stagger-children > *:nth-child(9) { animation-delay: 480ms; }
 .stagger-children > *:nth-child(10) { animation-delay: 540ms; }
 
-/* ── Utility classes ── */
+/* -- Utility classes -- */
 
-/* Card */
+/* Card - default in-app surface. Per V1.1 §1.7 default card is chassis on a
+ * chassis-deep / chassis-tone1 surround, NOT the white panel (panel is "for
+ * special" - see .lift-card below). */
 .card {
-  background: var(--pc-bg-surface);
-  border: 1px solid var(--pc-border);
-  border-radius: 1rem;
-  transition: all 0.3s ease;
+  background: var(--chassis);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .card:hover {
-  background: var(--pc-bg-elevated);
-  border-color: var(--pc-border-strong);
+  background: var(--chassis-deep);
+  border-color: var(--hairline-soft);
 }
 
-/* Glass card */
+/* Glass-card - historical name kept; V1.1 uses the same flat-card pattern
+ * (no backdrop-filter, no gradients). */
 .glass-card {
-  background: var(--pc-bg-surface);
-  border: 1px solid var(--pc-border);
-  border-radius: 1rem;
-  backdrop-filter: blur(16px);
-  transition: all 0.3s ease;
+  background: var(--chassis);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .glass-card:hover {
-  border-color: var(--pc-border-strong);
-  background: var(--pc-bg-elevated);
+  border-color: var(--hairline-soft);
+  background: var(--chassis-deep);
 }
 
-/* Surface panel */
+/* Surface panel - historical class name; in V1.1 it's a flat chassis panel. */
 .surface-panel {
-  background: var(--pc-bg-surface);
-  border: 1px solid var(--pc-border);
-  border-radius: 1.25rem;
-  backdrop-filter: blur(16px);
+  background: var(--chassis);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
 }
 
-/* Electric button (primary action) */
-.btn-electric {
-  background: var(--pc-accent);
-  color: white;
+/* Lift-card - V1.1 §3.18 + Fixup 4
+ *
+ * The "white tile" is THE lift-card itself (panel + shadow + hairline).
+ * .lift-card-surround is an optional outer wrapper in chassis-tone1 for the
+ * page-level "white tile sitting on cream" framing. .lift-card .inner is an
+ * inert pass-through so existing markup keeps working without a nested
+ * background. */
+.lift-card {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  box-shadow: var(--shadow-lift);
+}
+.lift-card .inner {
+  padding: 0;
+  background: transparent;
   border: none;
-  border-radius: 0.75rem;
-  font-weight: 500;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
+  box-shadow: none;
+}
+.lift-card-surround {
+  background: var(--chassis-tone1);
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+}
+.lift-card-surround > .lift-card {
+  margin-bottom: 0;
 }
 
-.btn-electric:hover:not(:disabled) {
-  opacity: 0.9;
-  box-shadow: 0 8px 24px rgba(var(--pc-accent-rgb), 0.15);
-}
-
-.btn-electric:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-electric:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-/* Electric input */
-.input-electric {
-  background: var(--pc-bg-input);
-  border: 1px solid var(--pc-border);
-  border-radius: 0.75rem;
-  color: var(--pc-text-primary);
-  transition: all 0.3s ease;
-}
-
-.input-electric:focus {
-  outline: none;
-  border-color: var(--pc-accent-dim);
-  box-shadow: 0 0 0 3px var(--pc-accent-glow);
-}
-
-.input-electric::placeholder {
-  color: var(--pc-text-muted);
-}
-
-/* Primary action (pill) */
+/* Primary button (oxblood pill) - V1.1 §3.11 */
+.btn-electric,
 .btn-primary {
-  background: var(--pc-accent);
-  color: white;
-  border-radius: 1rem;
-  font-weight: 600;
-  font-size: 0.875rem;
-  padding: 0.5rem 1.25rem;
+  background: var(--accent);
+  color: #fff;
   border: none;
+  border-radius: var(--radius-pill);
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 22px;
+  padding: 10px 22px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(var(--pc-accent-rgb), 0.2);
+  transition: background-color 0.15s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
+.btn-electric:hover:not(:disabled),
 .btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
+  background: var(--accent-hover);
 }
 
+.btn-electric:active:not(:disabled),
+.btn-primary:active:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-electric:disabled,
 .btn-primary:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-/* Secondary button */
-.btn-secondary {
-  background: var(--pc-bg-elevated);
-  color: var(--pc-text-secondary);
-  border: 1px solid var(--pc-border);
-  border-radius: 0.75rem;
-  font-weight: 500;
-  font-size: 0.875rem;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--pc-hover);
-  color: var(--pc-text-primary);
-  border-color: var(--pc-border-strong);
-}
-
-.btn-secondary:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-/* Icon button */
+/* Input (light chassis card) */
+.input-electric {
+  background: var(--panel);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  font-family: var(--f-body);
+  transition: border-color 0.15s ease;
+  padding: 8px 12px;
+}
+
+.input-electric:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input-electric::placeholder {
+  color: var(--ink-subdued);
+}
+
+/* Secondary button - ghost variant, ink-bordered pill */
+.btn-secondary,
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius-pill);
+  font-family: var(--f-display);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 22px;
+  padding: 9px 18px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.btn-secondary:hover:not(:disabled),
+.btn-ghost:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--chassis);
+}
+
+.btn-secondary:disabled,
+.btn-ghost:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Icon button - quiet square button */
 .btn-icon {
-  padding: 0.5rem;
-  border-radius: 0.75rem;
-  color: var(--pc-text-muted);
+  padding: var(--space-2);
+  border-radius: var(--radius-control);
+  color: var(--ink-muted);
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .btn-icon:hover {
-  background: var(--pc-hover);
-  color: var(--pc-text-secondary);
+  background: var(--chassis-deep);
+  color: var(--ink);
 }
 
-/* Danger button */
+/* Danger button - oxblood-on-soft (no separate red palette) */
 .btn-danger {
-  background: rgba(239, 68, 68, 0.1);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: 0.75rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-soft-2);
+  border-radius: var(--radius-pill);
+  font-family: var(--f-display);
   font-weight: 500;
-  font-size: 0.875rem;
-  padding: 0.5rem 1rem;
+  font-size: 14px;
+  line-height: 22px;
+  padding: 8px 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.15);
+  background: var(--accent-soft-2);
 }
 
 .btn-danger:disabled {
@@ -431,87 +660,91 @@ code, kbd, pre {
   cursor: not-allowed;
 }
 
-/* Status badge */
+/* -- Pills / status badges -- */
+
+/* .pill - Fixup 2-3: never wrap, content-width, no flex-grow, Medium weight.
+ * Per V1.1 §3.4 status-pill table. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: var(--radius-pill);
+  padding: 2px 12px;
+  text-align: center;
+  white-space: nowrap;
+  width: max-content;
+  flex: 0 0 auto;
+}
+
+.pill--strong   { background: var(--accent); color: #fff; border: none; }
+.pill--active   { background: var(--accent-soft); border: 1px solid var(--accent-soft-2); color: var(--accent); }
+.pill--dormant  { background: transparent; border: 1px solid var(--ink-faint); color: var(--ink-muted); }
+.pill--lost     { background: var(--accent-2-soft); border: 1px solid rgba(30, 44, 82, 0.25); color: var(--accent-2); }
+.pill--new      { background: var(--accent-3-soft); border: 1px dashed rgba(44, 74, 44, 0.30); color: var(--accent-3); }
+.pill--ctx      { background: transparent; border: 1px solid var(--ink-faint); color: var(--ink-muted); }
+.pill--recording { background: var(--accent); color: #fff; border: none; }
+.pill-row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+
+/* Legacy badge family - rebound onto V1.1 pill palette. */
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
+  gap: 6px;
+  padding: 2px 12px;
+  border-radius: var(--radius-pill);
+  font-family: var(--f-mono);
+  font-size: 10px;
   font-weight: 500;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   border: 1px solid;
+  white-space: nowrap;
+  width: max-content;
+  flex: 0 0 auto;
 }
 
-.badge-success {
-  background: rgba(0, 230, 138, 0.08);
-  color: #34d399;
-  border-color: rgba(0, 230, 138, 0.2);
-}
+.badge-success { background: var(--accent-3-soft); color: var(--accent-3); border-color: rgba(44, 74, 44, 0.25); }
+.badge-warning { background: var(--accent-warm-soft); color: var(--accent-warm-amber); border-color: rgba(139, 101, 0, 0.25); }
+.badge-error   { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft-2); }
+.badge-info    { background: var(--accent-2-soft); color: var(--accent-2); border-color: rgba(30, 44, 82, 0.25); }
 
-.badge-warning {
-  background: rgba(255, 170, 0, 0.08);
-  color: #fbbf24;
-  border-color: rgba(255, 170, 0, 0.2);
-}
+/* -- Status dots (no glow per V1.1 - Don'ts #6) -- */
 
-.badge-error {
-  background: rgba(255, 68, 102, 0.08);
-  color: #f87171;
-  border-color: rgba(255, 68, 102, 0.2);
-}
-
-.badge-info {
-  background: rgba(0, 128, 255, 0.08);
-  color: #60a5fa;
-  border-color: rgba(0, 128, 255, 0.2);
-}
-
-/* Status dot */
 .status-dot {
-  width: 0.5rem;
-  height: 0.5rem;
+  width: 8px;
+  height: 8px;
   border-radius: 9999px;
   flex-shrink: 0;
 }
 
-.status-dot-success {
-  background: var(--color-status-success);
-  box-shadow: 0 0 6px var(--color-status-success);
-}
+.status-dot-success { background: var(--status-success); }
+.status-dot-warning { background: var(--status-warning); }
+.status-dot-error   { background: var(--status-error); }
+.status-dot-info    { background: var(--status-info); }
 
-.status-dot-warning {
-  background: var(--color-status-warning);
-  box-shadow: 0 0 6px var(--color-status-warning);
-}
+/* Glow-dot kept as a class name (zero glow now - flat dot). */
+.glow-dot { /* deliberately flat per V1.1 Don'ts #6 */ }
 
-.status-dot-error {
-  background: var(--color-status-error);
-  box-shadow: 0 0 6px var(--color-status-error);
-}
-
-.status-dot-info {
-  background: var(--color-status-info);
-  box-shadow: 0 0 6px var(--color-status-info);
-}
-
-/* Glow dot (legacy) */
-.glow-dot {
-  box-shadow: 0 0 6px currentColor;
-}
-
-/* Gradient text */
+/* Deprecated gradient text - kept as inert (flat colour) so existing markup
+ * compiles. V1.1 forbids gradients (Don'ts #6/#7). */
 .text-gradient-blue {
-  background: linear-gradient(135deg, #0080ff, #00d4ff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--ink);
+  background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: initial;
+  background-clip: initial;
 }
 
-/* Modal backdrop */
+/* Modal backdrop - light scrim on cream */
 .modal-backdrop {
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(8px);
+  background: rgba(20, 18, 14, 0.45);
 }
 
 /* Progress bar */
@@ -527,61 +760,62 @@ code, kbd, pre {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  background: linear-gradient(90deg, transparent, rgba(20, 18, 14, 0.08), transparent);
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
 
-/* Table */
+/* -- Table (.table-electric) -- */
+
 .table-electric {
   width: 100%;
 }
 
 .table-electric thead tr {
-  border-bottom: 1px solid var(--pc-border);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .table-electric thead th {
-  color: var(--pc-text-muted);
+  color: var(--ink-muted);
+  font-family: var(--f-mono);
   font-weight: 500;
-  font-size: 0.75rem;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.75rem 1rem;
+  letter-spacing: 0.10em;
+  padding: var(--space-2) var(--space-3);
   position: sticky;
   top: 0;
   z-index: 1;
-  /* Match glass-card background so rows do not bleed through on scroll */
-  background: linear-gradient(135deg, rgba(13, 13, 32, 0.95), rgba(5, 5, 16, 0.90));
-  backdrop-filter: blur(8px);
+  background: var(--chassis-deep);
 }
 
 .table-electric tbody tr {
-  border-bottom: 1px solid var(--pc-separator);
-  transition: all 0.2s ease;
+  border-bottom: 1px solid var(--hairline);
+  transition: background-color 0.15s ease;
 }
 
 .table-electric tbody tr:hover {
-  background: var(--pc-hover);
+  background: var(--chassis-deep);
 }
 
 .table-electric tbody td {
-  padding: 0.75rem 1rem;
-  font-size: 0.875rem;
-  color: var(--pc-text-primary);
+  padding: var(--space-2) var(--space-3);
+  font-size: 14px;
+  color: var(--ink);
 }
 
-/* ── Markdown styles ── */
+/* -- Markdown styles (body content) -- */
+
 .markdown-body pre {
-  background: var(--pc-bg-code) !important;
-  border: 1px solid var(--pc-border);
-  border-radius: 0.75rem;
-  padding: 1rem;
+  background: var(--chassis-deep) !important;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  padding: var(--space-3);
   overflow-x: auto;
-  margin: 0.5rem 0;
-  font-family: var(--pc-font-mono);
-  font-size: calc(var(--pc-font-size-mono) * 0.9);
-  line-height: 1.6;
+  margin: var(--space-2) 0;
+  font-family: var(--f-mono);
+  font-size: 13px;
+  line-height: 20px;
   max-width: 100%;
   box-sizing: border-box;
 }
@@ -593,11 +827,11 @@ code, kbd, pre {
 }
 
 .markdown-body code {
-  background: var(--pc-accent-glow);
+  background: var(--accent-soft);
   padding: 2px 6px;
-  border-radius: 6px;
-  font-size: calc(var(--pc-font-size-mono) * 0.95);
-  font-family: var(--pc-font-mono);
+  border-radius: var(--radius-chip);
+  font-size: 13px;
+  font-family: var(--f-mono);
 }
 
 .markdown-body p { margin: 4px 0; }
@@ -608,15 +842,36 @@ code, kbd, pre {
 .markdown-body li > ul, .markdown-body li > ol { margin: 2px 0; }
 .markdown-body li > ul { list-style-type: circle; }
 .markdown-body li > ul > li > ul { list-style-type: square; }
-.markdown-body blockquote { border-left: 3px solid var(--pc-accent-dim); padding-left: 12px; margin: 8px 0; opacity: 0.8; }
-.markdown-body h1, .markdown-body h2, .markdown-body h3 { margin: 12px 0 4px; }
-.markdown-body a { color: var(--pc-accent-light); text-decoration: underline; }
-.markdown-body table { border-collapse: collapse; margin: 8px 0; display: block; overflow-x: auto; max-width: 100%; }
-.markdown-body th, .markdown-body td { border: 1px solid var(--pc-border); padding: 6px 12px; }
-.markdown-body th { background: var(--pc-accent-glow); }
+.markdown-body blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+  margin: 8px 0;
+  color: var(--ink-muted);
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  margin: 12px 0 4px;
+  font-family: var(--f-display);
+  font-weight: 600;
+}
+.markdown-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(122, 31, 31, 0.30);
+  text-underline-offset: 3px;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.markdown-body th, .markdown-body td { border: 1px solid var(--hairline); padding: 6px 12px; }
+.markdown-body th { background: var(--chassis-deep); }
 .markdown-body img { max-width: 100%; border-radius: 8px; }
 
-/* ── Chat markdown (agent bubbles) ── */
+/* -- Chat markdown (agent bubbles) -- */
+
 .chat-markdown p { margin: 0.5em 0; }
 .chat-markdown p:first-child { margin-top: 0; }
 .chat-markdown p:last-child { margin-bottom: 0; }
@@ -626,24 +881,362 @@ code, kbd, pre {
 .chat-markdown li { margin: 0.25em 0; }
 .chat-markdown li > ul { list-style-type: circle; }
 .chat-markdown li > ul > li > ul { list-style-type: square; }
-.chat-markdown blockquote { border-left: 3px solid var(--pc-accent-dim); padding-left: 0.75em; margin: 0.5em 0; color: var(--pc-text-muted); }
-.chat-markdown h1, .chat-markdown h2, .chat-markdown h3, .chat-markdown h4 { margin: 0.75em 0 0.25em; font-weight: 600; }
+.chat-markdown blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  color: var(--ink-muted);
+}
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3, .chat-markdown h4 {
+  margin: 0.75em 0 0.25em;
+  font-family: var(--f-display);
+  font-weight: 600;
+}
 .chat-markdown h1 { font-size: 1.25em; }
 .chat-markdown h2 { font-size: 1.125em; }
 .chat-markdown h3 { font-size: 1em; }
-.chat-markdown hr { border: none; border-top: 1px solid var(--pc-border); margin: 0.75em 0; }
-.chat-markdown a { color: var(--pc-accent-light); text-decoration: underline; }
-.chat-markdown strong { font-weight: 600; color: var(--pc-text-primary); }
+.chat-markdown hr { border: none; border-top: 1px solid var(--hairline); margin: 0.75em 0; }
+.chat-markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(122, 31, 31, 0.30);
+  text-underline-offset: 3px;
+}
+.chat-markdown strong { font-weight: 600; color: var(--ink); }
 .chat-markdown em { font-style: italic; }
-.chat-markdown code { background: var(--pc-accent-glow); padding: 0.125em 0.375em; border-radius: 0.375em; font-size: 0.875em; font-family: var(--pc-font-mono); }
-.chat-markdown pre { background: var(--pc-bg-code); border: 1px solid var(--pc-border); border-radius: 0.5em; padding: 0.75em; margin: 0.5em 0; overflow-x: auto; font-family: var(--pc-font-mono); font-size: 0.85em; line-height: 1.5; }
+.chat-markdown code {
+  background: var(--accent-soft);
+  padding: 0.125em 0.375em;
+  border-radius: var(--radius-chip);
+  font-size: 0.875em;
+  font-family: var(--f-mono);
+}
+.chat-markdown pre {
+  background: var(--chassis-deep);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  padding: 0.75em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  font-family: var(--f-mono);
+  font-size: 13px;
+  line-height: 20px;
+}
 .chat-markdown pre code { background: transparent; padding: 0; border-radius: 0; font-size: inherit; }
-.chat-markdown table { border-collapse: collapse; margin: 0.5em 0; display: block; overflow-x: auto; max-width: 100%; }
-.chat-markdown th, .chat-markdown td { border: 1px solid var(--pc-border); padding: 0.375em 0.75em; font-size: 0.875em; }
-.chat-markdown th { background: var(--pc-accent-glow); font-weight: 600; }
-.chat-markdown img { max-width: 100%; border-radius: 0.5em; }
+.chat-markdown table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.chat-markdown th, .chat-markdown td { border: 1px solid var(--hairline); padding: 6px 12px; font-size: 13px; }
+.chat-markdown th { background: var(--chassis-deep); font-weight: 600; }
+.chat-markdown img { max-width: 100%; border-radius: 8px; }
 
-/* ── Accessibility: reduced motion ── */
+/* -- Tool call cards (AgentChat) -- */
+
+.tool-card {
+  border-left: 3px solid var(--accent);
+  background: var(--chassis);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  border-top: 1px solid var(--hairline);
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tool-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--f-body);
+  color: var(--ink);
+}
+
+.tool-card details summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 4px;
+}
+
+.tool-card pre {
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 12rem;
+  overflow-y: auto;
+  margin-top: 4px;
+  padding: var(--space-2);
+  border-radius: var(--radius-chip);
+  background: var(--chassis-deep);
+  font-family: var(--f-mono);
+}
+
+.tool-card__inline {
+  font-size: 11px;
+  font-family: var(--f-mono);
+  color: var(--ink-muted);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* -- Chat surface components - V1.1 §3.6/3.7/3.8/3.9/3.10 -- */
+
+/* Letter avatar - Instance A (product) + Instance B (assistant). §3.6 */
+.letter-avatar {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.letter-avatar--product   { background: var(--accent); color: #fff; }
+.letter-avatar--assistant { background: var(--accent-soft); border: 1.5px solid var(--accent); color: var(--ink); }
+
+/* Assistant card - Plex Sans Medium 500 lead + Regular 400 continuation. §3.8 */
+.assistant-card {
+  max-width: 80%;
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+}
+.assistant-card .head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--hairline);
+}
+.assistant-card .head .label {
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ink);
+}
+.assistant-card .head .sub {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+.assistant-card .body-lead {
+  font-family: var(--f-body);
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 26px;
+  color: var(--ink);
+  margin: 0 0 var(--space-2);
+}
+.assistant-card .body-cont {
+  font-family: var(--f-body);
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--ink);
+  margin: 0;
+}
+.assistant-card em { font-style: italic; }
+.assistant-card strong { font-weight: 700; }
+.assistant-card .inline-code {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  background: var(--accent-soft);
+  border-radius: var(--radius-chip);
+  padding: 1px 6px;
+  color: var(--ink);
+}
+.assistant-card a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(122, 31, 31, 0.30);
+  text-underline-offset: 3px;
+}
+
+/* Citation strip - Sentence case prefix in Plex Sans + UPPERCASE Plex Mono
+ * hyperlinks with dotted-underline secondary-link treatment. §3.9 */
+.citation-strip {
+  margin-top: var(--space-3);
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--accent);
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.citation-strip .label {
+  font-family: var(--f-body);
+  font-weight: 400;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ink-muted);
+}
+.citation-strip .sources { display: inline; }
+.citation-strip a.source {
+  font-family: var(--f-mono);
+  font-weight: 400;
+  font-size: 11px;
+  line-height: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--link-secondary);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(122, 31, 31, 0.40);
+  text-underline-offset: 3px;
+}
+.citation-strip a.source:hover {
+  text-decoration-style: solid;
+  text-decoration-color: var(--accent);
+  color: var(--accent);
+}
+.citation-strip .sep {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--ink-subdued);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  margin: 0 4px;
+}
+
+/* User message pill - three variants. Default is Variant C (cream + ink). §3.7 */
+.user-pill {
+  max-width: 80%;
+  border-radius: var(--radius-card);
+  border-top-right-radius: var(--radius-chip);
+  padding: var(--space-3);
+  font-family: var(--f-body);
+  font-size: 14px;
+  line-height: 22px;
+}
+.user-pill--A { background: #3A3833; color: #fff; font-weight: 400; }
+.user-pill--B { background: var(--ink);  color: #fff; font-weight: 500; }
+.user-pill--C { background: var(--chassis-deep); color: var(--ink); font-weight: 400; }
+
+/* Typing indicator. §3.10 */
+.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--chassis-deep);
+  border-radius: var(--radius-pill);
+  padding: 8px 14px;
+}
+.typing .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-muted);
+  animation: typing-bounce 1.4s infinite ease-in-out;
+}
+.typing .dot:nth-child(2) { animation-delay: 0.16s; }
+.typing .dot:nth-child(3) { animation-delay: 0.32s; }
+
+/* Chat divider. §3.17 */
+.chat-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+}
+.chat-divider .rule { flex: 1; height: 1px; background: var(--hairline); }
+.chat-divider .pill-cd {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+/* -- Note-box variants - §3.16 -- */
+
+.note-box {
+  padding: var(--space-3);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  margin: var(--space-3) 0;
+}
+.note-box--default { background: var(--accent-soft);      border-left: 2px solid var(--accent); }
+.note-box--info    { background: var(--accent-2-soft);    border-left: 2px solid var(--accent-2); }
+.note-box--success { background: var(--accent-3-soft);    border-left: 2px solid var(--accent-3); }
+.note-box--warning { background: var(--accent-warm-soft); border-left: 2px solid var(--accent-warm-amber); }
+.note-box .label {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  margin-bottom: 4px;
+}
+.note-box--default .label { color: var(--accent); }
+.note-box--info .label    { color: var(--accent-2); }
+.note-box--success .label { color: var(--accent-3); }
+.note-box--warning .label { color: var(--accent-warm-amber); }
+.note-box .body {
+  font-family: var(--f-body);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ink);
+}
+
+/* -- Section header - strap + h1 + meta -- */
+
+.section-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-4);
+  align-items: baseline;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: var(--space-3);
+}
+.section-header .strap {
+  font-family: var(--f-display);
+  font-weight: 500;
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.20em;
+  color: var(--ink-muted);
+  margin-bottom: 4px;
+}
+.section-header .title {
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 24px;
+  line-height: 30px;
+  letter-spacing: -0.3px;
+  margin: 0;
+}
+.section-header .meta {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--ink-muted);
+  text-align: right;
+}
+
+/* -- Accessibility: reduced motion -- */
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
   .animate-fade-in-legacy,
@@ -655,63 +1248,12 @@ code, kbd, pre {
   .animate-float {
     animation: none;
   }
-  .pulse-dot {
-    animation: none;
-  }
-  .bounce-dot {
-    animation: none;
-    opacity: 0.7;
-  }
-  .progress-bar-animated::after {
-    animation: none;
-  }
-  *,
-  *::before,
-  *::after {
+  .pulse-dot { animation: none; }
+  .bounce-dot { animation: none; opacity: 0.7; }
+  .progress-bar-animated::after { animation: none; }
+  *, *::before, *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
-}
-
-/* ── Tool call cards (AgentChat) ── */
-.tool-card {
-  border-left: 3px solid var(--pc-accent);
-  background: var(--pc-bg-surface);
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-}
-
-.tool-card__header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-}
-
-.tool-card details summary {
-  cursor: pointer;
-  user-select: none;
-  font-size: 0.75rem;
-  color: var(--pc-text-muted);
-  margin-top: 0.25rem;
-}
-
-.tool-card pre {
-  font-size: 0.75rem;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 12rem;
-  overflow-y: auto;
-  margin-top: 0.25rem;
-  padding: 0.5rem;
-  border-radius: 0.375rem;
-  background: var(--pc-bg-code);
-}
-
-.tool-card__inline {
-  font-size: 0.75rem;
-  color: var(--pc-text-muted);
-  margin-top: 0.25rem;
 }
