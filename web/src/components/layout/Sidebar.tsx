@@ -12,6 +12,7 @@ import {
   Activity,
   Stethoscope,
   Monitor,
+  BookOpen,
 } from 'lucide-react';
 import { t } from '@/lib/i18n';
 import { featureFlags } from '@/config/features';
@@ -24,6 +25,7 @@ const allNavItems = [
   { to: '/tools', icon: Wrench, labelKey: 'nav.tools', show: true },
   { to: '/cron', icon: Clock, labelKey: 'nav.cron', show: true },
   { to: '/integrations', icon: Puzzle, labelKey: 'nav.integrations', show: true },
+  { to: '/wiki', icon: BookOpen, labelKey: 'nav.wiki', show: true },
   { to: '/memory', icon: Brain, labelKey: 'nav.memory', show: true },
   { to: '/config', icon: Settings, labelKey: 'nav.config', show: true },
   { to: '/cost', icon: DollarSign, labelKey: 'nav.cost', show: featureFlags.v1_show_cost },

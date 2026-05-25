@@ -21,6 +21,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': '日志',
     'nav.doctor': '诊断',
     'nav.canvas': '画布',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': '仪表盘',
@@ -465,6 +474,14 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.wiki': 'Wiki',
     'nav.wiki_fallback': 'Personal wiki',
 
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
+
     // Dashboard
     'dashboard.title': 'Dashboard',
     'dashboard.provider': 'Provider',
@@ -898,6 +915,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Kayıtlar',
     'nav.doctor': 'Doktor',
     'nav.canvas': 'Tuval',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Kontrol Paneli',
@@ -1324,6 +1350,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'السجلات',
     'nav.doctor': 'التشخيص',
     'nav.canvas': 'اللوحة',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'لوحة التحكم',
@@ -1679,6 +1714,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'লগ',
     'nav.doctor': 'ডক্টর',
     'nav.canvas': 'ক্যানভাস',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'ড্যাশবোর্ড',
@@ -2034,6 +2078,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Protokoly',
     'nav.doctor': 'Diagnostika',
     'nav.canvas': 'Plátno',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Přehled',
@@ -2389,6 +2442,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Logfiler',
     'nav.doctor': 'Diagnostik',
     'nav.canvas': 'Lærred',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Dashboard',
@@ -2744,6 +2806,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Protokolle',
     'nav.doctor': 'Diagnose',
     'nav.canvas': 'Leinwand',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Dashboard',
@@ -3099,6 +3170,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Αρχεία καταγραφής',
     'nav.doctor': 'Διαγνωστικά',
     'nav.canvas': 'Καμβάς',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Πίνακας ελέγχου',
@@ -3454,6 +3534,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Registros',
     'nav.doctor': 'Diagnóstico',
     'nav.canvas': 'Lienzo',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Panel de control',
@@ -3809,6 +3898,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Lokit',
     'nav.doctor': 'Diagnostiikka',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Hallintapaneeli',
@@ -4164,6 +4262,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Journaux',
     'nav.doctor': 'Diagnostic',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Tableau de bord',
@@ -4519,6 +4626,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'יומנים',
     'nav.doctor': 'אבחון',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'לוח בקרה',
@@ -4874,6 +4990,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'लॉग',
     'nav.doctor': 'डॉक्टर',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'डैशबोर्ड',
@@ -5229,6 +5354,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Naplók',
     'nav.doctor': 'Diagnosztika',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Vezérlőpult',
@@ -5584,6 +5718,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Log',
     'nav.doctor': 'Dokter',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Dasbor',
@@ -5939,6 +6082,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Log',
     'nav.doctor': 'Diagnostica',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Pannello di controllo',
@@ -6294,6 +6446,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'ログ',
     'nav.doctor': '診断',
     'nav.canvas': 'キャンバス',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'ダッシュボード',
@@ -6649,6 +6810,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': '로그',
     'nav.doctor': '진단',
     'nav.canvas': '캔버스',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': '대시보드',
@@ -7004,6 +7174,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Logger',
     'nav.doctor': 'Diagnose',
     'nav.canvas': 'Lerret',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Dashbord',
@@ -7359,6 +7538,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Logboeken',
     'nav.doctor': 'Diagnose',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Dashboard',
@@ -7714,6 +7902,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Logi',
     'nav.doctor': 'Diagnostyka',
     'nav.canvas': 'Płótno',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Panel',
@@ -8069,6 +8266,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Logs',
     'nav.doctor': 'Diagnóstico',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Painel',
@@ -8424,6 +8630,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Jurnale',
     'nav.doctor': 'Diagnosticare',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Panou de control',
@@ -8779,6 +8994,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Журналы',
     'nav.doctor': 'Диагностика',
     'nav.canvas': 'Холст',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Панель управления',
@@ -9134,6 +9358,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Loggar',
     'nav.doctor': 'Diagnostik',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Instrumentpanel',
@@ -9489,6 +9722,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'บันทึก',
     'nav.doctor': 'วินิจฉัย',
     'nav.canvas': 'แคนวาส',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'แดชบอร์ด',
@@ -9844,6 +10086,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Mga Log',
     'nav.doctor': 'Diagnostiko',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Dashboard',
@@ -10199,6 +10450,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Журнали',
     'nav.doctor': 'Діагностика',
     'nav.canvas': 'Полотно',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Панель керування',
@@ -10554,6 +10814,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'لاگز',
     'nav.doctor': 'تشخیص',
     'nav.canvas': 'کینوس',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'ڈیش بورڈ',
@@ -10909,6 +11178,15 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Nhật ký',
     'nav.doctor': 'Chẩn đoán',
     'nav.canvas': 'Canvas',
+    'nav.wiki': 'Wiki',
+
+    // Wiki page (embedded wiki webview)
+    'wiki.loading_title': 'Building your wiki...',
+    'wiki.loading_hint': 'The wiki compiles from your graph the first time it runs. This can take a moment on fresh installs.',
+    'wiki.error_title': 'Wiki not available',
+    'wiki.error_hint': 'The wiki service is not responding on port 8044. It may still be starting up.',
+    'wiki.error_retry': 'Try again',
+    'wiki.iframe_title': 'Ostler Wiki',
 
     // Dashboard
     'dashboard.title': 'Bảng điều khiển',
