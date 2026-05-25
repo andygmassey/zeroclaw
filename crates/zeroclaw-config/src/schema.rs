@@ -413,6 +413,35 @@ pub struct Config {
     #[serde(default)]
     pub locale: Option<String>,
 
+    /// Customer's preferred first name (CX-81 B6).
+    ///
+    /// Captured by the CM051 setup wizard at Q3 ("What should your assistant
+    /// call you?"). Read by the agent runtime to address the customer by
+    /// their preferred name in the system prompt, by the Tauri Hub via
+    /// `GET /api/identity` to template the `{first_name}pedia` wiki nav
+    /// label, and by the iOS Companion at app launch.
+    ///
+    /// Non-symmetric fallback: `None` does NOT fall back to
+    /// `user_assistant_name`. The wiki surfaces show "Personal wiki" when
+    /// this field is `None`. See `BRAND_SPEC_V1.1.md` §8 #2 for the full
+    /// truth table.
+    #[serde(default)]
+    pub user_first_name: Option<String>,
+
+    /// Customer's chosen name for their assistant (CX-81 B6).
+    ///
+    /// Captured by the CM051 setup wizard at Q7 ("What should you call your
+    /// assistant?"). Read by the agent runtime to inject "Your name is
+    /// {assistant_name}" at the top of the system prompt, by the Tauri Hub
+    /// chat header, and by the iOS Companion chat tab.
+    ///
+    /// Non-symmetric fallback: `None` does NOT fall back to
+    /// `user_first_name`. The chat surfaces show "Your assistant" when this
+    /// field is `None`. See `BRAND_SPEC_V1.1.md` §8 #2 for the full truth
+    /// table.
+    #[serde(default)]
+    pub user_assistant_name: Option<String>,
+
     /// Verifiable Intent (VI) credential verification and issuance (`[verifiable_intent]`).
     #[serde(default)]
     #[nested]
@@ -9336,6 +9365,11 @@ impl Default for Config {
             image_gen: ImageGenConfig::default(),
             plugins: PluginsConfig::default(),
             locale: None,
+            // CX-81 B6: customer-chosen display names. None means the
+            // surfaces fall back to "Personal wiki" / "Your assistant"
+            // per BRAND_SPEC_V1.1 §8 #2 (non-symmetric fallback).
+            user_first_name: None,
+            user_assistant_name: None,
             verifiable_intent: VerifiableIntentConfig::default(),
             claude_code: ClaudeCodeConfig::default(),
             claude_code_runner: ClaudeCodeRunnerConfig::default(),
@@ -11965,6 +11999,11 @@ auto_save = true
             image_gen: ImageGenConfig::default(),
             plugins: PluginsConfig::default(),
             locale: None,
+            // CX-81 B6: customer-chosen display names. None means the
+            // surfaces fall back to "Personal wiki" / "Your assistant"
+            // per BRAND_SPEC_V1.1 §8 #2 (non-symmetric fallback).
+            user_first_name: None,
+            user_assistant_name: None,
             verifiable_intent: VerifiableIntentConfig::default(),
             claude_code: ClaudeCodeConfig::default(),
             claude_code_runner: ClaudeCodeRunnerConfig::default(),
@@ -12535,6 +12574,11 @@ default_temperature = 0.7
             image_gen: ImageGenConfig::default(),
             plugins: PluginsConfig::default(),
             locale: None,
+            // CX-81 B6: customer-chosen display names. None means the
+            // surfaces fall back to "Personal wiki" / "Your assistant"
+            // per BRAND_SPEC_V1.1 §8 #2 (non-symmetric fallback).
+            user_first_name: None,
+            user_assistant_name: None,
             verifiable_intent: VerifiableIntentConfig::default(),
             claude_code: ClaudeCodeConfig::default(),
             claude_code_runner: ClaudeCodeRunnerConfig::default(),

@@ -457,6 +457,13 @@ const translations: Record<Locale, Record<string, string>> = {
     'nav.logs': 'Logs',
     'nav.doctor': 'Doctor',
     'nav.canvas': 'Canvas',
+    // CX-81 B6 + B7: wiki nav label. B7 introduces the nav item itself; B6
+    // wires the customer-personalised label. Renderers should call
+    // `firstNameToPediaLabel(user_first_name)` to derive the label at
+    // render-time and fall back to this key (`Personal wiki`) when the
+    // customer's first name is unset.
+    'nav.wiki': 'Wiki',
+    'nav.wiki_fallback': 'Personal wiki',
 
     // Dashboard
     'dashboard.title': 'Dashboard',
@@ -476,6 +483,10 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Agent / Chat
     'agent.title': 'Agent Chat',
+    // CX-81 B6: fallback label used by the chat header when the customer's
+    // chosen assistant name (user_assistant_name) is unset. B3 reskin
+    // consumes this via `useIdentity()` → `assistantName ?? t('agent.header_fallback')`.
+    'agent.header_fallback': 'Your assistant',
     'agent.send': 'Send',
     'agent.placeholder': 'Type a message...',
     'agent.start_conversation': 'Send a message to start the conversation',

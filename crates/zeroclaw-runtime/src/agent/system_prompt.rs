@@ -10,6 +10,54 @@ use crate::skills::Skill;
 /// Maximum characters per injected workspace file (matches `OpenClaw` default).
 pub const BOOTSTRAP_MAX_CHARS: usize = 20_000;
 
+/// Build the customer-identity prefix that prepends to the system prompt
+/// (CX-81 B6).
+///
+/// The two name fields ride on `Config.user_first_name` /
+/// `Config.user_assistant_name`. They are injected at the top of the prompt
+/// so the local LLM addresses the customer by their preferred name and
+/// answers as the assistant name the customer chose during setup.
+///
+/// Non-symmetric fallback (`BRAND_SPEC_V1.1.md` §8 #2): `None` for either
+/// field is silent -- `None` does NOT borrow from the other field. Both
+/// `None` returns `None` (no prefix emitted).
+///
+/// Whitespace-only strings are treated as `None` (i.e. the daemon-side
+/// view of an `_first_name_esc=""` value that the installer wrote when the
+/// customer left the field blank).
+pub fn build_user_identity_prefix(
+    user_first_name: Option<&str>,
+    user_assistant_name: Option<&str>,
+) -> Option<String> {
+    let first = user_first_name.and_then(|s| {
+        let t = s.trim();
+        if t.is_empty() { None } else { Some(t) }
+    });
+    let assistant = user_assistant_name.and_then(|s| {
+        let t = s.trim();
+        if t.is_empty() { None } else { Some(t) }
+    });
+
+    if first.is_none() && assistant.is_none() {
+        return None;
+    }
+
+    let mut out = String::with_capacity(128);
+    out.push_str("## Your Identity\n\n");
+    if let Some(name) = assistant {
+        out.push_str(&format!(
+            "Your name is {name}. When the customer asks who you are, say {name}.\n"
+        ));
+    }
+    if let Some(name) = first {
+        out.push_str(&format!(
+            "You are addressing {name}. Use this name when greeting them or referring to them in conversation.\n"
+        ));
+    }
+    out.push('\n');
+    Some(out)
+}
+
 fn load_openclaw_bootstrap_files(
     prompt: &mut String,
     workspace_dir: &std::path::Path,
@@ -385,5 +433,76 @@ fn inject_workspace_file(
             // Missing-file marker (matches OpenClaw behavior)
             let _ = writeln!(prompt, "### {filename}\n\n[File not found: {filename}]\n");
         }
+    }
+}
+
+#[cfg(test)]
+mod identity_prefix_tests {
+    //! CX-81 B6 -- tests for the customer-identity prefix helper.
+    //!
+    //! Verifies the four-cell non-symmetric fallback matrix from
+    //! `BRAND_SPEC_V1.1.md` §8 #2:
+    //!
+    //! | first_name | assistant_name | first chars                          |
+    //! |------------|----------------|--------------------------------------|
+    //! | set        | set            | prefix mentions both                 |
+    //! | set        | None           | prefix mentions only first_name      |
+    //! | None       | set            | prefix mentions only assistant_name  |
+    //! | None       | None           | no prefix (None returned)            |
+    //!
+    //! Whitespace-only strings collapse to None.
+    use super::build_user_identity_prefix;
+
+    #[test]
+    fn both_names_set_emits_both_lines() {
+        let out = build_user_identity_prefix(Some("Alice"), Some("Iris")).unwrap();
+        assert!(out.contains("Your name is Iris"));
+        assert!(out.contains("You are addressing Alice"));
+        assert!(out.starts_with("## Your Identity"));
+    }
+
+    #[test]
+    fn first_name_set_assistant_none_no_borrow() {
+        let out = build_user_identity_prefix(Some("Bob"), None).unwrap();
+        // first_name DOES NOT borrow to synthesise an assistant name.
+        assert!(out.contains("You are addressing Bob"));
+        assert!(!out.contains("Your name is"));
+        assert!(!out.contains("Bob's assistant"));
+    }
+
+    #[test]
+    fn assistant_set_first_name_none_no_borrow() {
+        let out = build_user_identity_prefix(None, Some("Iris")).unwrap();
+        // assistant_name DOES NOT borrow to synthesise a first name.
+        assert!(out.contains("Your name is Iris"));
+        assert!(!out.contains("You are addressing"));
+        assert!(!out.contains("Iris's user"));
+    }
+
+    #[test]
+    fn both_none_emits_no_prefix() {
+        assert!(build_user_identity_prefix(None, None).is_none());
+    }
+
+    #[test]
+    fn both_empty_strings_emits_no_prefix() {
+        // The CM051 installer writes empty strings when the wizard fields
+        // were left blank, e.g. `user_first_name = ""`. These must collapse
+        // to None inside the helper so the prompt does not contain
+        // "Your name is .".
+        assert!(build_user_identity_prefix(Some(""), Some("")).is_none());
+    }
+
+    #[test]
+    fn whitespace_only_collapses_to_none() {
+        // " " and "\t" alone are not real names; treat as unset.
+        assert!(build_user_identity_prefix(Some("   "), Some("\t")).is_none());
+    }
+
+    #[test]
+    fn first_name_only_whitespace_assistant_set() {
+        let out = build_user_identity_prefix(Some("  "), Some("Iris")).unwrap();
+        assert!(out.contains("Your name is Iris"));
+        assert!(!out.contains("You are addressing"));
     }
 }

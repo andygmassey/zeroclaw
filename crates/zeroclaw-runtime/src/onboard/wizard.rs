@@ -434,6 +434,9 @@ pub async fn run_wizard(force: bool, callbacks: WizardCallbacks) -> Result<Confi
         image_gen: zeroclaw_config::schema::ImageGenConfig::default(),
         plugins: zeroclaw_config::schema::PluginsConfig::default(),
         locale: None,
+        // CX-81 B6: identity defaults to None; wizard captures + persists.
+        user_first_name: None,
+        user_assistant_name: None,
         verifiable_intent: zeroclaw_config::schema::VerifiableIntentConfig::default(),
         claude_code: zeroclaw_config::schema::ClaudeCodeConfig::default(),
         claude_code_runner: zeroclaw_config::schema::ClaudeCodeRunnerConfig::default(),
@@ -914,6 +917,9 @@ async fn run_quick_setup_with_home(
         image_gen: zeroclaw_config::schema::ImageGenConfig::default(),
         plugins: zeroclaw_config::schema::PluginsConfig::default(),
         locale: None,
+        // CX-81 B6: identity defaults to None; wizard captures + persists.
+        user_first_name: None,
+        user_assistant_name: None,
         verifiable_intent: zeroclaw_config::schema::VerifiableIntentConfig::default(),
         claude_code: zeroclaw_config::schema::ClaudeCodeConfig::default(),
         claude_code_runner: zeroclaw_config::schema::ClaudeCodeRunnerConfig::default(),

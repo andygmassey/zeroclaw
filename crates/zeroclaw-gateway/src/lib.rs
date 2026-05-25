@@ -1070,6 +1070,10 @@ pub async fn run_gateway(
         .route("/hooks/claude-code", post(api::handle_claude_code_hook))
         // ── Web Dashboard API routes ──
         .route("/api/status", get(api::handle_api_status))
+        // CX-81 B6: identity endpoint exposes the customer's display names
+        // captured during the CM051 setup wizard. Read by the Tauri Hub +
+        // iOS Companion to drive the chat header and wiki nav label.
+        .route("/api/identity", get(api::handle_api_identity))
         .route("/api/config", get(api::handle_api_config_get))
         .route("/api/tools", get(api::handle_api_tools))
         .route("/api/cron", get(api::handle_api_cron_list))

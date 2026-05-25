@@ -133,6 +133,60 @@ pub async fn handle_api_status(
     Json(body).into_response()
 }
 
+/// GET /api/identity -- customer display names captured at install time.
+///
+/// Returns `{ user_first_name, user_assistant_name }` (both nullable
+/// strings) from the loaded config. Read by:
+///   * the Tauri Hub chat header to display the chosen assistant name
+///   * the Tauri Hub sidebar to template the `{first_name}pedia` wiki nav
+///     label (B7 surface)
+///   * the iOS Companion at app launch to populate both surfaces over the
+///     paired connection
+///
+/// Both fields preserve the daemon-side `Option<String>` (`null` on the
+/// JSON side) so callers can apply the asymmetric fallback rule from
+/// `BRAND_SPEC_V1.1.md` §8 #2 themselves.
+///
+/// Authentication: same `require_auth` PairingGuard as the other
+/// `/api/*` endpoints. No data leaves this endpoint that the paired
+/// peer cannot already infer from chat content.
+pub async fn handle_api_identity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_auth(&state, &headers) {
+        return e.into_response();
+    }
+
+    let config = state.config.lock().clone();
+
+    // CX-81 B6: collapse empty / whitespace-only strings to JSON null so
+    // callers see a single "unset" representation. The CM051 installer
+    // writes empty strings (`user_first_name = ""`) when the customer
+    // left the wizard field blank; the daemon must surface that as null
+    // so the surfaces apply their "Personal wiki" / "Your assistant"
+    // fallback rather than rendering an empty bubble.
+    let first = config
+        .user_first_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let assistant = config
+        .user_assistant_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let body = serde_json::json!({
+        "user_first_name": first,
+        "user_assistant_name": assistant,
+    });
+
+    Json(body).into_response()
+}
+
 /// GET /api/config — current config (api_key masked)
 pub async fn handle_api_config_get(
     State(state): State<AppState>,
