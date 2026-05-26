@@ -5345,10 +5345,12 @@ pub async fn start_channels(config: Config) -> Result<()> {
     // fields have an asymmetric fallback (BRAND_SPEC_V1.1 §8 #2) so the
     // helper itself handles the per-cell rendering; we just prepend its
     // output. None → no prefix → no behaviour change vs pre-B6.
-    if let Some(identity_prefix) = zeroclaw_runtime::agent::system_prompt::build_user_identity_prefix(
-        config.user_first_name.as_deref(),
-        config.user_assistant_name.as_deref(),
-    ) {
+    if let Some(identity_prefix) =
+        zeroclaw_runtime::agent::system_prompt::build_user_identity_prefix(
+            config.user_first_name.as_deref(),
+            config.user_assistant_name.as_deref(),
+        )
+    {
         system_prompt = format!("{identity_prefix}{system_prompt}");
     }
     if !native_tools {
