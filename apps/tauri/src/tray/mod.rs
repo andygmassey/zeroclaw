@@ -16,6 +16,10 @@ pub fn setup_tray<R: Runtime>(app: &App<R>) -> Result<TrayIcon<R>, tauri::Error>
     TrayIconBuilder::with_id("main")
         .tooltip("Ostler - Disconnected")
         .icon(icon::icon_for_state(false, crate::state::AgentStatus::Idle))
+        // Render the icon as a macOS template image so the system tints it
+        // for light and dark menu bar themes automatically. No effect on
+        // Windows / Linux runtimes.
+        .icon_as_template(true)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(events::handle_menu_event)

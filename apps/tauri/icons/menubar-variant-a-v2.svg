@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- Variant A v2 (Andy 2026-05-26): heavier outer ring (echo logotype weight) + larger inner O (more O, less padding). Black on transparent; macOS auto-tints via template image flag. -->
+  <circle cx="12" cy="12" r="9.5" fill="none" stroke="black" stroke-width="3.5"/>
+</svg>
