@@ -28,15 +28,20 @@ export function firstNameToPediaLabel(firstName: string | null | undefined): str
   const trimmed = firstName.trim();
   if (trimmed.length === 0) return 'Personal wiki';
 
-  // First word for multi-word names ("Mary Beth" -> "Mary")
-  const firstWord = trimmed.split(/\s+/)[0];
+  // First word for multi-word names ("Mary Beth" -> "Mary").
+  // `?? ''` narrows the noUncheckedIndexedAccess `T | undefined` to a
+  // concrete string; at runtime `String.split` always yields at least one
+  // element so the fallback never fires, and if it ever did the existing
+  // length === 0 guard below catches it. Zero behaviour change.
+  const firstWord = trimmed.split(/\s+/)[0] ?? '';
 
   // Strip apostrophes ("O'Brien" -> "OBrien"). Preserve original casing per spec.
   // U+0027 APOSTROPHE + U+2019 RIGHT SINGLE QUOTATION MARK (smart-quote).
   const stripped = firstWord.replace(/['’]/g, '');
 
   // Hyphenated: use part before first hyphen ("Jean-Paul" -> "Jean").
-  const beforeHyphen = stripped.split('-')[0];
+  // Same `?? ''` narrowing rationale as firstWord above.
+  const beforeHyphen = stripped.split('-')[0] ?? '';
 
   // Defensive: if all transformations consumed the input (e.g. input was "-"
   // alone or "'"), fall back to the unset label rather than emitting "pedia"
