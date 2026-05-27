@@ -1,7 +1,7 @@
 use crate::cron::{
-    CronJob, CronJobPatch, DeliveryConfig, JobType, Schedule, SessionTarget, all_overdue_jobs,
-    due_jobs, next_run_for_schedule, record_last_run, record_run, remove_job, reschedule_after_run,
-    sync_declarative_jobs, update_job,
+    CronJob, CronJobPatch, DeliveryConfig, GateDecision, JobType, Schedule, SessionTarget,
+    all_overdue_jobs, check_gate, due_jobs, next_run_for_schedule, record_last_run, record_run,
+    remove_job, reschedule_after_run, sync_declarative_jobs, update_job,
 };
 use crate::security::SecurityPolicy;
 use anyhow::{Result, anyhow};
@@ -52,6 +52,8 @@ pub async fn run(config: Config, event_tx: EventBroadcast) -> Result<()> {
             uses_memory: true,
             session_target: None,
             delivery: None,
+            // Backup is infrastructure -- runs regardless of subscription state.
+            subscription_gated: false,
         };
         tracing::debug!(
             schedule = %schedule_cron,
@@ -268,7 +270,57 @@ async fn execute_and_persist_job(
     crate::health::mark_component_ok(component);
     warn_if_high_frequency_agent_job(job);
 
+    // G9 subscription gate: when a job opts into gating
+    // (`subscription_gated = true`) and the customer's subscription is
+    // genuinely inactive, skip this dispatch without running the
+    // workload. Reschedules normally so the gate is re-evaluated on the
+    // next tick once the customer reactivates. Fail-open on
+    // missing/corrupt state -- the legitimate-customer-on-holiday case
+    // must never be blocked on infrastructure failure we cannot
+    // observe. See `cron::subscription_gate`.
     let started_at = Utc::now();
+    if job.subscription_gated {
+        let decision = check_gate(started_at);
+        if !decision.allows_run() {
+            tracing::info!(
+                gate = "skip",
+                job_id = %job.id,
+                reason = "subscription_inactive",
+                "cron job skipped by subscription gate"
+            );
+            let output = format!(
+                "skipped by subscription gate (subscription_inactive) for job_id={}",
+                job.id
+            );
+            let finished_at = Utc::now();
+            // Persist via the standard path so next_run advances and
+            // the skipped run is visible in cron history. Treat as
+            // success=true so the scheduler does not retry inside the
+            // current tick -- a skipped gate is an intentional outcome,
+            // not a transient failure.
+            let _ = Box::pin(persist_job_result(
+                config,
+                job,
+                true,
+                &output,
+                started_at,
+                finished_at,
+            ))
+            .await;
+            return (job.id.clone(), true, output);
+        }
+        if matches!(
+            decision,
+            GateDecision::FailOpenMissing | GateDecision::FailOpenCorrupt
+        ) {
+            tracing::debug!(
+                gate = "fail_open",
+                job_id = %job.id,
+                "subscription gate fail-open path; job will run"
+            );
+        }
+    }
+
     let (success, output) = Box::pin(execute_job_with_retry(config, security, job)).await;
     let finished_at = Utc::now();
     let success = Box::pin(persist_job_result(
@@ -1034,6 +1086,7 @@ mod tests {
             allowed_tools: None,
             uses_memory: true,
             source: "imperative".into(),
+            subscription_gated: false,
             created_at: Utc::now(),
             next_run: Utc::now(),
             last_run: None,
@@ -2090,6 +2143,7 @@ mod tests {
                 max_wait_secs: 120,
                 startup_grace_secs: 60,
             }),
+            subscription_gated: false,
         }
     }
 
@@ -2179,5 +2233,207 @@ mod tests {
         };
         let not_ready = probe_sweep_plan(&plan, |_| async move { true }).await;
         assert!(not_ready.is_empty());
+    }
+
+    // ── G9 subscription gate dispatch integration ───────────────
+    //
+    // These tests exercise `execute_and_persist_job` end-to-end with a
+    // real on-disk subscription state file. They share a tokio Mutex
+    // (NOT std::sync::Mutex) because the guard must be held across
+    // `.await` points -- the lock serialises the env var override
+    // `OSTLER_SUBSCRIPTION_STATE` and cargo runs tests in parallel by
+    // default. Holding a std::sync::Mutex across await would block
+    // the runtime; the async-aware variant is correct here.
+
+    fn gate_env_lock() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        &LOCK
+    }
+
+    fn write_subscription_state(tmp: &TempDir, body: &str) -> std::path::PathBuf {
+        let path = tmp.path().join("subscription_state.json");
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    /// Read the persisted last_status for a job to confirm
+    /// `execute_and_persist_job` actually ran (or didn't run) the
+    /// underlying command.
+    fn job_last_output(config: &Config, job_id: &str) -> Option<String> {
+        cron::get_job(config, job_id)
+            .ok()
+            .and_then(|j| j.last_output)
+    }
+
+    #[tokio::test]
+    async fn gated_job_with_active_subscription_executes() {
+        let _guard = gate_env_lock().lock().await;
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let state_path = write_subscription_state(&tmp, r#"{"status":"active"}"#);
+        // SAFETY: tests serialised via gate_env_lock.
+        unsafe { std::env::set_var("OSTLER_SUBSCRIPTION_STATE", &state_path) };
+
+        // Insert a real job so persist_job_result has a row to update.
+        let stored = cron::add_shell_job(
+            &config,
+            Some("g9-active".into()),
+            crate::cron::Schedule::Every {
+                every_ms: 60 * 60 * 1000,
+            },
+            "echo g9-active-runs",
+        )
+        .unwrap();
+        // Flip the gate bit on the stored job.
+        let stored = cron::update_job(
+            &config,
+            &stored.id,
+            CronJobPatch {
+                subscription_gated: Some(true),
+                ..CronJobPatch::default()
+            },
+        )
+        .unwrap();
+        assert!(stored.subscription_gated);
+
+        let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+        let (_job_id, success, output) =
+            execute_and_persist_job(&config, &security, &stored, "gate-test").await;
+        assert!(success);
+        assert!(
+            output.contains("g9-active-runs"),
+            "active subscription must let the underlying command run; got: {output}"
+        );
+
+        unsafe { std::env::remove_var("OSTLER_SUBSCRIPTION_STATE") };
+    }
+
+    #[tokio::test]
+    async fn gated_job_with_inactive_subscription_is_skipped() {
+        let _guard = gate_env_lock().lock().await;
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let state_path = write_subscription_state(&tmp, r#"{"status":"inactive"}"#);
+        unsafe { std::env::set_var("OSTLER_SUBSCRIPTION_STATE", &state_path) };
+
+        let stored = cron::add_shell_job(
+            &config,
+            Some("g9-inactive".into()),
+            crate::cron::Schedule::Every {
+                every_ms: 60 * 60 * 1000,
+            },
+            "echo g9-this-must-not-run",
+        )
+        .unwrap();
+        let stored = cron::update_job(
+            &config,
+            &stored.id,
+            CronJobPatch {
+                subscription_gated: Some(true),
+                ..CronJobPatch::default()
+            },
+        )
+        .unwrap();
+
+        let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+        let (_job_id, success, output) =
+            execute_and_persist_job(&config, &security, &stored, "gate-test").await;
+
+        // Skipped jobs are reported as success=true (intentional
+        // outcome, not a retryable failure) and the output carries the
+        // gate-skip marker. The underlying command's `echo` output
+        // must NOT appear -- proving the job was actually skipped.
+        assert!(success);
+        assert!(
+            output.contains("skipped by subscription gate"),
+            "skipped output must carry the gate marker; got: {output}"
+        );
+        assert!(
+            !output.contains("g9-this-must-not-run"),
+            "skipped job must not execute the underlying command; got: {output}"
+        );
+        // The persisted last_output should match.
+        let persisted = job_last_output(&config, &stored.id).unwrap_or_default();
+        assert!(
+            persisted.contains("skipped by subscription gate"),
+            "persisted last_output must record the skip; got: {persisted}"
+        );
+
+        unsafe { std::env::remove_var("OSTLER_SUBSCRIPTION_STATE") };
+    }
+
+    #[tokio::test]
+    async fn gated_job_with_missing_state_file_fails_open_and_executes() {
+        let _guard = gate_env_lock().lock().await;
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let missing = tmp.path().join("does_not_exist_state.json");
+        unsafe { std::env::set_var("OSTLER_SUBSCRIPTION_STATE", &missing) };
+
+        let stored = cron::add_shell_job(
+            &config,
+            Some("g9-fail-open".into()),
+            crate::cron::Schedule::Every {
+                every_ms: 60 * 60 * 1000,
+            },
+            "echo g9-fail-open-runs",
+        )
+        .unwrap();
+        let stored = cron::update_job(
+            &config,
+            &stored.id,
+            CronJobPatch {
+                subscription_gated: Some(true),
+                ..CronJobPatch::default()
+            },
+        )
+        .unwrap();
+
+        let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+        let (_job_id, success, output) =
+            execute_and_persist_job(&config, &security, &stored, "gate-test").await;
+        assert!(success);
+        assert!(
+            output.contains("g9-fail-open-runs"),
+            "missing state file must fail-open (legitimate pre-install customer); got: {output}"
+        );
+
+        unsafe { std::env::remove_var("OSTLER_SUBSCRIPTION_STATE") };
+    }
+
+    #[tokio::test]
+    async fn ungated_job_with_inactive_subscription_still_executes() {
+        // The gate is opt-in per job. An infrastructure job
+        // (subscription_gated = false) must keep running regardless of
+        // subscription state -- backups, log-rotate, heartbeats stay
+        // alive for cancelled customers so reactivation works smoothly.
+        let _guard = gate_env_lock().lock().await;
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp).await;
+        let state_path = write_subscription_state(&tmp, r#"{"status":"inactive"}"#);
+        unsafe { std::env::set_var("OSTLER_SUBSCRIPTION_STATE", &state_path) };
+
+        let stored = cron::add_shell_job(
+            &config,
+            Some("g9-ungated".into()),
+            crate::cron::Schedule::Every {
+                every_ms: 60 * 60 * 1000,
+            },
+            "echo g9-ungated-runs",
+        )
+        .unwrap();
+        // Note: do NOT flip subscription_gated. Default is false.
+        assert!(!stored.subscription_gated);
+
+        let security = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+        let (_job_id, success, output) =
+            execute_and_persist_job(&config, &security, &stored, "gate-test").await;
+        assert!(success);
+        assert!(
+            output.contains("g9-ungated-runs"),
+            "ungated job must execute regardless of subscription state; got: {output}"
+        );
+
+        unsafe { std::env::remove_var("OSTLER_SUBSCRIPTION_STATE") };
     }
 }

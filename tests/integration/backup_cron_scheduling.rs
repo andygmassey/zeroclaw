@@ -38,6 +38,7 @@ fn backup_cron_job_synced_when_schedule_set() {
             session_target: None,
             uses_memory: true,
             delivery: None,
+            subscription_gated: false,
         };
         jobs_with_builtin.push(backup_job);
     }
@@ -91,6 +92,7 @@ fn backup_cron_job_removed_when_schedule_cleared() {
             session_target: None,
             uses_memory: true,
             delivery: None,
+            subscription_gated: false,
         };
         jobs_with_builtin.push(backup_job);
     }
@@ -133,6 +135,7 @@ fn backup_cron_job_schedule_updated() {
             session_target: None,
             uses_memory: true,
             delivery: None,
+            subscription_gated: false,
         };
         jobs_v1.push(backup_job);
     }
@@ -161,6 +164,7 @@ fn backup_cron_job_schedule_updated() {
             session_target: None,
             uses_memory: true,
             delivery: None,
+            subscription_gated: false,
         };
         jobs_v2.push(backup_job);
     }
@@ -199,6 +203,7 @@ fn backup_cron_job_id_is_stable() {
                 session_target: None,
                 uses_memory: true,
                 delivery: None,
+                subscription_gated: false,
             };
             jobs_with_builtin.push(backup_job);
         }
@@ -244,6 +249,7 @@ fn backup_cron_job_command_is_backup_create() {
             session_target: None,
             uses_memory: true,
             delivery: None,
+            subscription_gated: false,
         };
         jobs_with_builtin.push(backup_job);
     }
@@ -276,6 +282,7 @@ fn backup_cron_job_type_is_shell() {
             session_target: None,
             uses_memory: true,
             delivery: None,
+            subscription_gated: false,
         };
         jobs_with_builtin.push(backup_job);
     }
@@ -308,6 +315,7 @@ fn backup_cron_job_source_is_declarative() {
             session_target: None,
             uses_memory: true,
             delivery: None,
+            subscription_gated: false,
         };
         jobs_with_builtin.push(backup_job);
     }

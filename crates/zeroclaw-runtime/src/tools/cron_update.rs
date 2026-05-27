@@ -103,6 +103,10 @@ impl Tool for CronUpdateTool {
                             "type": "boolean",
                             "description": "If true, delete the job automatically after its first successful run"
                         },
+                        "subscription_gated": {
+                            "type": "boolean",
+                            "description": "If true, this job is paused when the customer's Ostler Pro subscription is inactive. Daily-brief composition, brief delivery, and Reminders push should set this; infrastructure jobs (backups, log-rotate, heartbeats) should leave it false. Fail-open on missing or corrupt subscription state."
+                        },
                         // NOTE: oneOf is correct for OpenAI-compatible APIs (including OpenRouter).
                         // Gemini does not support oneOf in tool schemas; if Gemini native tool calling
                         // is ever wired up, SchemaCleanr::clean_for_gemini must be applied before

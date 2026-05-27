@@ -192,6 +192,19 @@ pub struct CronJob {
     /// How the job was created: `"imperative"` (CLI/API) or `"declarative"` (config).
     #[serde(default = "default_source")]
     pub source: String,
+    /// Whether this job is gated by the customer's Ostler Pro subscription.
+    ///
+    /// When `true`, the scheduler reads `~/.ostler/state/subscription_state.json`
+    /// before each dispatch and skips the job if the subscription is inactive
+    /// (with fail-open semantics for missing/corrupt state and the offline
+    /// grace window). Defaults to `false` for backwards compatibility -- this
+    /// is an explicit opt-in per job so future authors declare gating
+    /// alongside the cron definition.
+    ///
+    /// See G9 in [[feedback-subscription-gating-v1]] +
+    /// [[project-pricing-v1-0-locked-2026-05-27]].
+    #[serde(default)]
+    pub subscription_gated: bool,
     pub created_at: DateTime<Utc>,
     pub next_run: DateTime<Utc>,
     pub last_run: Option<DateTime<Utc>>,
@@ -223,6 +236,7 @@ pub struct CronJobPatch {
     pub delete_after_run: Option<bool>,
     pub allowed_tools: Option<Vec<String>>,
     pub uses_memory: Option<bool>,
+    pub subscription_gated: Option<bool>,
 }
 
 #[cfg(test)]

@@ -6362,6 +6362,28 @@ pub struct CronJobDecl {
     /// Delivery configuration.
     #[serde(default)]
     pub delivery: Option<DeliveryConfigDecl>,
+    /// Whether this job is gated by the customer's Ostler Pro subscription.
+    ///
+    /// When `true`, the scheduler reads
+    /// `~/.ostler/state/subscription_state.json` (the file written by
+    /// CM051's `subscription_gate.py` helper) before each dispatch and
+    /// skips the job if the subscription is inactive. Fail-open
+    /// semantics: missing/corrupt state or recent companion validation
+    /// inside the offline grace window both allow the job to run --
+    /// legitimate customers are never locked out by infrastructure
+    /// failure the Hub cannot observe.
+    ///
+    /// Defaults to `false` for backwards compatibility. Every cron job
+    /// declares its own gating posture; future authors should set this
+    /// to `true` for any work the customer pays Ostler Pro for
+    /// (daily-brief composition, brief delivery, Reminders push, etc.)
+    /// and leave it `false` for infrastructure jobs (heartbeat,
+    /// log-rotate, health-check).
+    ///
+    /// See G9 in [[feedback-subscription-gating-v1]] +
+    /// [[project-pricing-v1-0-locked-2026-05-27]].
+    #[serde(default)]
+    pub subscription_gated: bool,
 }
 
 /// Schedule variant for declarative cron jobs.

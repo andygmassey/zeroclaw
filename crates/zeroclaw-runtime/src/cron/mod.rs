@@ -4,9 +4,13 @@ use zeroclaw_config::schema::Config;
 
 mod schedule;
 mod store;
+mod subscription_gate;
 mod types;
 
 pub mod scheduler;
+
+#[allow(unused_imports)]
+pub use subscription_gate::{GateDecision, check_gate};
 
 #[allow(unused_imports)]
 pub use schedule::{
