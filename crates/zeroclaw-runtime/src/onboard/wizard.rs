@@ -4458,9 +4458,7 @@ fn setup_channels(
                 print_bullet("Use '*' only for temporary open testing.");
 
                 let allowed_users_str: String = Input::new()
-                    .with_prompt(
-                        "  Allowed Mattermost user IDs (comma-separated, '*' for all)",
-                    )
+                    .with_prompt("  Allowed Mattermost user IDs (comma-separated, '*' for all)")
                     .allow_empty(true)
                     .interact_text()?;
 
@@ -4522,9 +4520,8 @@ fn setup_channels(
                     continue;
                 }
 
-                let app_password: String = Input::new()
-                    .with_prompt("  App password")
-                    .interact_text()?;
+                let app_password: String =
+                    Input::new().with_prompt("  App password").interact_text()?;
                 let app_password = app_password.trim().to_string();
 
                 if app_password.is_empty() {
